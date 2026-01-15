@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-paper-100 text-ink-100 font-sans;
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 31px,
+      rgba(232, 228, 216, 0.4) 31px,
+      rgba(232, 228, 216, 0.4) 32px
+    );
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-5 py-2.5 font-hand text-lg font-semibold transition-all duration-200;
+    @apply border-2 border-ink-100 bg-paper-50 text-ink-200;
+    @apply hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)];
+    @apply active:translate-y-0 active:shadow-none;
+    @apply focus:outline-none focus:ring-2 focus:ring-accent-yellow focus:ring-offset-2;
+    transform: rotate(-0.5deg);
+    border-radius: 8px;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent-yellow border-ink-100;
+    @apply hover:bg-accent-orange;
+  }
+
+  .btn-secondary {
+    @apply btn bg-paper-200 border-ink-100;
+    @apply hover:bg-paper-300;
+  }
+
+  .btn-danger {
+    @apply btn bg-accent-pink border-ink-100 text-white;
+    @apply hover:bg-red-500;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 font-hand text-lg border-2 border-ink-100 bg-white;
+    @apply focus:outline-none focus:ring-2 focus:ring-accent-blue focus:border-ink-200;
+    border-radius: 6px;
+    transform: rotate(-0.3deg);
+  }
+
+  .textarea {
+    @apply input min-h-[140px] resize-y font-sans text-base;
+    line-height: 32px;
+    background-image: repeating-linear-gradient(
+      transparent,
+      transparent 31px,
+      rgba(232, 228, 216, 0.6) 31px,
+      rgba(232, 228, 216, 0.6) 32px
+    );
+  }
+
+  .card {
+    @apply bg-white border-2 border-ink-100 p-8 relative;
+    border-radius: 12px;
+    box-shadow: 6px 6px 0px 0px rgba(0, 0, 0, 0.1);
+    transform: rotate(-0.2deg);
+  }
+
+  .tab {
+    @apply px-6 py-3 font-hand text-xl font-semibold text-ink-100;
+    @apply border-b-2 border-transparent hover:border-accent-yellow;
+    @apply transition-all cursor-pointer relative;
+  }
+
+  .tab::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 50%;
+    transform: translateX(-50%) scaleX(0);
+    width: 80%;
+    height: 3px;
+    background: currentColor;
+    transition: transform 0.2s ease;
+  }
+
+  .tab:hover::after {
+    transform: translateX(-50%) scaleX(1);
+  }
+
+  .tab-active {
+    @apply tab text-accent-orange;
+    @apply border-accent-orange;
+  }
+
+  .tab-active::after {
+    transform: translateX(-50%) scaleX(1);
+  }
+
+  .sketch-underline {
+    position: relative;
+    display: inline-block;
+  }
+
+  .sketch-underline::after {
+    content: '';
+    position: absolute;
+    left: -2px;
+    right: -2px;
+    bottom: -4px;
+    height: 8px;
+    background: rgba(255, 184, 77, 0.4);
+    transform: rotate(-0.5deg);
+    z-index: -1;
+  }
+
+  .handdrawn-box {
+    position: relative;
+    padding: 1rem;
+    background: white;
+    border: 2px solid #2d2d2d;
+    border-radius: 8px;
+  }
+
+  .handdrawn-box::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border: 2px solid rgba(45, 45, 45, 0.2);
+    border-radius: 10px;
+    transform: rotate(0.5deg);
+  }
+}
