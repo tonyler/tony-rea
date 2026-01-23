@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { validateLLMResponse } from '../schemas/output-schemas';
+import { llmConfig, type LLMMode } from '../config';
 
 let openai: OpenAI;
 
@@ -16,6 +17,7 @@ export interface LLMCallOptions {
   model?: string;
   temperature?: number;
   maxRetries?: number;
+  mode?: LLMMode;
 }
 
 export async function callLLM<T>(
@@ -29,10 +31,14 @@ export async function callLLM<T>(
   const {
     userPrompt,
     systemPrompt,
-    model = process.env.OPENAI_MODEL || 'gpt-4',
-    temperature = 0.7,
-    maxRetries = 1,
+    model = llmConfig.defaultModel,
+    temperature,
+    maxRetries = llmConfig.maxRetries,
+    mode,
   } = options;
+
+  // Use mode-specific temperature if mode provided, otherwise use provided temperature or default
+  const finalTemperature = temperature ?? (mode ? llmConfig.temperatures[mode] : 0.7);
 
   let lastError = '';
 
@@ -44,7 +50,7 @@ export async function callLLM<T>(
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        temperature,
+        temperature: finalTemperature,
       });
 
       const content = response.choices[0]?.message?.content;
@@ -89,19 +95,22 @@ export async function callLLM<T>(
 export async function callLLMRaw(
   userPrompt: string,
   systemPrompt: string,
-  model?: string
+  options?: { model?: string; temperature?: number; mode?: LLMMode }
 ): Promise<string> {
   if (!openai) {
     throw new Error('LLM service not initialized');
   }
 
+  const { model, temperature, mode } = options ?? {};
+  const finalTemperature = temperature ?? (mode ? llmConfig.temperatures[mode] : 0.7);
+
   const response = await openai.chat.completions.create({
-    model: model || process.env.OPENAI_MODEL || 'gpt-4',
+    model: model || llmConfig.defaultModel,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    temperature: 0.7,
+    temperature: finalTemperature,
   });
 
   return response.choices[0]?.message?.content || '';

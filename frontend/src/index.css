@@ -3,131 +3,341 @@
 @tailwind utilities;
 
 @layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-paper-100 text-ink-100 font-sans;
-    background-image: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 31px,
-      rgba(232, 228, 216, 0.4) 31px,
-      rgba(232, 228, 216, 0.4) 32px
-    );
+    @apply bg-void-500 text-cream-100 font-body;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  /* Subtle noise texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    opacity: 0.03;
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  ::selection {
+    @apply bg-amber-300/30 text-cream-50;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-void-400;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-smoke-400 rounded-full;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-smoke-300;
   }
 }
 
 @layer components {
+  /* ═══════════════════════════════════════════
+     BUTTONS
+     ═══════════════════════════════════════════ */
   .btn {
-    @apply px-5 py-2.5 font-hand text-lg font-semibold transition-all duration-200;
-    @apply border-2 border-ink-100 bg-paper-50 text-ink-200;
-    @apply hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)];
-    @apply active:translate-y-0 active:shadow-none;
-    @apply focus:outline-none focus:ring-2 focus:ring-accent-yellow focus:ring-offset-2;
-    transform: rotate(-0.5deg);
+    @apply relative px-5 py-2.5 font-body text-sm font-medium tracking-wide;
+    @apply border border-smoke-400 bg-void-200 text-cream-200;
+    @apply hover:bg-void-100 hover:border-smoke-300 hover:text-cream-50;
+    @apply focus:outline-none focus:ring-2 focus:ring-amber-300/30 focus:ring-offset-2 focus:ring-offset-void-500;
+    @apply transition-all duration-200 ease-out;
+    @apply disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-void-200;
     border-radius: 8px;
   }
 
   .btn-primary {
-    @apply btn bg-accent-yellow border-ink-100;
-    @apply hover:bg-accent-orange;
+    @apply btn;
+    @apply bg-gradient-to-b from-amber-300 to-amber-400 text-void-500 border-amber-400;
+    @apply hover:from-amber-200 hover:to-amber-300 hover:border-amber-300;
+    @apply shadow-glow-sm hover:shadow-glow;
+    font-weight: 600;
   }
 
   .btn-secondary {
-    @apply btn bg-paper-200 border-ink-100;
-    @apply hover:bg-paper-300;
+    @apply btn;
+    @apply bg-void-300/80 border-smoke-400/60 text-cream-200;
+    @apply hover:bg-void-200 hover:border-smoke-300 hover:text-cream-50;
+    @apply shadow-inner-glow;
   }
 
   .btn-danger {
-    @apply btn bg-accent-pink border-ink-100 text-white;
-    @apply hover:bg-red-500;
+    @apply btn;
+    @apply bg-coral-500/20 text-coral-400 border-coral-500/40;
+    @apply hover:bg-coral-500/30 hover:border-coral-400/60;
   }
 
-  .input {
-    @apply w-full px-4 py-3 font-hand text-lg border-2 border-ink-100 bg-white;
-    @apply focus:outline-none focus:ring-2 focus:ring-accent-blue focus:border-ink-200;
+  .btn-ghost {
+    @apply px-4 py-2 text-sm font-medium text-smoke-50 tracking-wide;
+    @apply hover:text-cream-50 hover:bg-void-200/50;
+    @apply transition-all duration-200;
     border-radius: 6px;
-    transform: rotate(-0.3deg);
+  }
+
+  /* ═══════════════════════════════════════════
+     FORM INPUTS
+     ═══════════════════════════════════════════ */
+  .input {
+    @apply w-full px-4 py-3 font-body text-base text-cream-100;
+    @apply bg-void-300/60 border border-smoke-400/50;
+    @apply placeholder:text-smoke-100/60;
+    @apply focus:outline-none focus:ring-2 focus:ring-amber-300/20 focus:border-amber-400/50;
+    @apply hover:border-smoke-300/60;
+    @apply transition-all duration-200;
+    border-radius: 8px;
+  }
+
+  .input:disabled {
+    @apply opacity-50 cursor-not-allowed;
   }
 
   .textarea {
-    @apply input min-h-[140px] resize-y font-sans text-base;
-    line-height: 32px;
-    background-image: repeating-linear-gradient(
-      transparent,
-      transparent 31px,
-      rgba(232, 228, 216, 0.6) 31px,
-      rgba(232, 228, 216, 0.6) 32px
-    );
+    @apply input min-h-[140px] resize-y leading-relaxed;
   }
 
+  /* Select styling */
+  select.input {
+    @apply appearance-none cursor-pointer pr-10;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%238e8e99'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px;
+  }
+
+  /* ═══════════════════════════════════════════
+     CARDS
+     ═══════════════════════════════════════════ */
   .card {
-    @apply bg-white border-2 border-ink-100 p-8 relative;
-    border-radius: 12px;
-    box-shadow: 6px 6px 0px 0px rgba(0, 0, 0, 0.1);
-    transform: rotate(-0.2deg);
+    @apply relative bg-void-300/50 p-6;
+    @apply border border-smoke-400/30;
+    @apply shadow-card;
+    @apply animate-fade-in;
+    @apply backdrop-blur-sm;
+    border-radius: 14px;
+    /* Subtle top edge highlight */
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.03),
+      0 4px 24px -4px rgba(0, 0, 0, 0.5);
   }
 
+  .card:hover {
+    @apply border-smoke-400/50;
+  }
+
+  .card-elevated {
+    @apply card;
+    @apply shadow-elevated;
+    @apply border-smoke-300/40;
+  }
+
+  .card-interactive {
+    @apply card cursor-pointer;
+    @apply hover:border-amber-400/30 hover:shadow-card-hover;
+    @apply transition-all duration-300;
+  }
+
+  /* ═══════════════════════════════════════════
+     TABS
+     ═══════════════════════════════════════════ */
   .tab {
-    @apply px-6 py-3 font-hand text-xl font-semibold text-ink-100;
-    @apply border-b-2 border-transparent hover:border-accent-yellow;
-    @apply transition-all cursor-pointer relative;
+    @apply relative px-5 py-3 font-body text-sm font-medium text-smoke-100;
+    @apply hover:text-cream-100;
+    @apply transition-all duration-200 cursor-pointer;
   }
 
   .tab::after {
     content: '';
-    position: absolute;
-    bottom: -2px;
-    left: 50%;
-    transform: translateX(-50%) scaleX(0);
-    width: 80%;
-    height: 3px;
-    background: currentColor;
-    transition: transform 0.2s ease;
+    @apply absolute bottom-0 left-1/2 -translate-x-1/2 w-0 h-0.5;
+    @apply bg-amber-300 rounded-full;
+    @apply transition-all duration-300 ease-out;
   }
 
   .tab:hover::after {
-    transform: translateX(-50%) scaleX(1);
+    @apply w-4;
   }
 
   .tab-active {
-    @apply tab text-accent-orange;
-    @apply border-accent-orange;
+    @apply tab text-amber-300;
   }
 
   .tab-active::after {
-    transform: translateX(-50%) scaleX(1);
+    @apply w-full bg-gradient-to-r from-transparent via-amber-300 to-transparent;
+    height: 2px;
   }
 
-  .sketch-underline {
-    position: relative;
-    display: inline-block;
+  /* ═══════════════════════════════════════════
+     BADGES
+     ═══════════════════════════════════════════ */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-1 text-xs font-semibold tracking-wide rounded-full;
+    @apply border;
   }
 
-  .sketch-underline::after {
+  .badge-success {
+    @apply badge bg-jade-500/15 text-jade-400 border-jade-500/30;
+  }
+
+  .badge-warning {
+    @apply badge bg-honey-500/15 text-honey-400 border-honey-500/30;
+  }
+
+  .badge-danger {
+    @apply badge bg-coral-500/15 text-coral-400 border-coral-500/30;
+  }
+
+  .badge-neutral {
+    @apply badge bg-smoke-400/30 text-smoke-50 border-smoke-400/40;
+  }
+
+  /* ═══════════════════════════════════════════
+     LINKS
+     ═══════════════════════════════════════════ */
+  .link {
+    @apply text-amber-300 hover:text-amber-200;
+    @apply underline underline-offset-2 decoration-amber-300/40;
+    @apply hover:decoration-amber-300;
+    @apply transition-colors duration-200;
+  }
+
+  /* ═══════════════════════════════════════════
+     ALERTS
+     ═══════════════════════════════════════════ */
+  .alert {
+    @apply p-4 border rounded-lg;
+  }
+
+  .alert-success {
+    @apply alert bg-jade-500/10 border-jade-500/30 text-cream-100;
+  }
+
+  .alert-warning {
+    @apply alert bg-honey-500/10 border-honey-500/30 text-cream-100;
+  }
+
+  .alert-danger {
+    @apply alert bg-coral-500/10 border-coral-500/30 text-cream-100;
+  }
+
+  .alert-info {
+    @apply alert bg-amber-300/10 border-amber-300/30 text-cream-100;
+  }
+
+  /* ═══════════════════════════════════════════
+     PROSE / CONTENT
+     ═══════════════════════════════════════════ */
+  .prose-content {
+    @apply text-cream-200 leading-relaxed;
+  }
+
+  .prose-content p {
+    @apply mb-4 last:mb-0;
+  }
+
+  .prose-content ul, .prose-content ol {
+    @apply mb-4 pl-5 space-y-2;
+  }
+
+  .prose-content li {
+    @apply text-cream-200;
+  }
+
+  .prose-content li::marker {
+    @apply text-amber-400/60;
+  }
+
+  /* ═══════════════════════════════════════════
+     DIVIDERS
+     ═══════════════════════════════════════════ */
+  .divider {
+    @apply border-t border-smoke-400/30 my-6;
+  }
+
+  /* ═══════════════════════════════════════════
+     GLOW EFFECTS
+     ═══════════════════════════════════════════ */
+  .glow-amber {
+    @apply shadow-glow;
+  }
+
+  .glow-amber-lg {
+    @apply shadow-glow-lg;
+  }
+
+  /* Text glow for headings */
+  .text-glow {
+    text-shadow: 0 0 30px rgba(249, 216, 115, 0.3);
+  }
+
+  /* ═══════════════════════════════════════════
+     CODE BLOCKS
+     ═══════════════════════════════════════════ */
+  .code-block {
+    @apply bg-void-400/80 p-5 rounded-lg overflow-auto;
+    @apply border border-smoke-500/50;
+  }
+
+  .code-block pre {
+    @apply whitespace-pre-wrap font-mono text-sm text-cream-200 leading-relaxed;
+  }
+
+  /* ═══════════════════════════════════════════
+     RESULT BOX (for AI responses)
+     ═══════════════════════════════════════════ */
+  .result-box {
+    @apply bg-void-400/60 p-5 rounded-lg;
+    @apply border-l-2 border-amber-400/60;
+    @apply text-cream-100 leading-relaxed;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Gradient text */
+  .text-gradient {
+    @apply bg-gradient-to-r from-amber-200 via-amber-300 to-ember-400 bg-clip-text text-transparent;
+  }
+
+  /* Shimmer loading effect */
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+
+  .shimmer::after {
     content: '';
-    position: absolute;
-    left: -2px;
-    right: -2px;
-    bottom: -4px;
-    height: 8px;
-    background: rgba(255, 184, 77, 0.4);
-    transform: rotate(-0.5deg);
-    z-index: -1;
-  }
-
-  .handdrawn-box {
-    position: relative;
-    padding: 1rem;
-    background: white;
-    border: 2px solid #2d2d2d;
-    border-radius: 8px;
-  }
-
-  .handdrawn-box::before {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    border: 2px solid rgba(45, 45, 45, 0.2);
-    border-radius: 10px;
-    transform: rotate(0.5deg);
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(249, 216, 115, 0.08),
+      transparent
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
   }
 }

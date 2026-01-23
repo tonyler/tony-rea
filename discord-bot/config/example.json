@@ -1,0 +1,9 @@
+{
+  "projectId": "example-project",
+  "serverId": "123456789012345678",
+  "whitelistedChannels": ["111111111111111111"],
+  "monitoredChannels": ["222222222222222222", "333333333333333333"],
+  "trackedUsers": ["444444444444444444", "555555555555555555"],
+  "enabled": false,
+  "minMessageLength": 20
+}

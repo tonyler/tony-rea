@@ -1,102 +1,48 @@
-import { listEntries, writeKB } from './storage';
+import { listEntries, writeKBIndex } from './storage';
 import { Entry } from './storage';
 
 /**
- * Compiles all active entries into a knowledge base markdown file
+ * Compiles a simple title index for retrieval
+ * Full content is retrieved on-demand from individual entry files
  */
 export async function compileKB(projectId: string): Promise<void> {
+  // Just compile the title index - no more compiled kb.md
+  await compileKBIndex(projectId);
+}
+
+/**
+ * Compiles a title + tags index for RAG retrieval
+ * Format: {entryId}: {title} [tag1, tag2, ...]
+ */
+export async function compileKBIndex(projectId: string): Promise<void> {
   const entries = await listEntries(projectId);
 
   // Filter out deprecated entries
   const activeEntries = entries.filter(entry => !entry.deprecated);
 
   if (activeEntries.length === 0) {
-    await writeKB(projectId, '# Knowledge Base\n\nNo entries yet.\n');
+    await writeKBIndex(projectId, '');
     return;
   }
 
-  // Build KB content
-  let kb = '# Knowledge Base\n\n';
-  kb += `Last compiled: ${new Date().toISOString()}\n\n`;
-  kb += `Total entries: ${activeEntries.length}\n\n`;
-  kb += '---\n\n';
+  // Sort by date (newest first)
+  activeEntries.sort((a, b) => {
+    const dateA = a.data.date_detected || a.created_at;
+    const dateB = b.data.date_detected || b.created_at;
+    return dateB.localeCompare(dateA);
+  });
 
-  // Group entries by tags if available
-  const taggedEntries = new Map<string, Entry[]>();
-  const untaggedEntries: Entry[] = [];
+  // Build title + tags index
+  const lines: string[] = [];
 
   for (const entry of activeEntries) {
-    const tags = entry.data.tags || [];
-    if (tags.length === 0) {
-      untaggedEntries.push(entry);
-    } else {
-      for (const tag of tags) {
-        if (!taggedEntries.has(tag)) {
-          taggedEntries.set(tag, []);
-        }
-        taggedEntries.get(tag)!.push(entry);
-      }
-    }
+    const tags = entry.data.tags && entry.data.tags.length > 0
+      ? ` [${entry.data.tags.join(', ')}]`
+      : '';
+    lines.push(`${entry.id}: ${entry.data.title}${tags}`);
   }
 
-  // Write tagged sections
-  for (const [tag, entries] of taggedEntries.entries()) {
-    kb += `## ${tag}\n\n`;
-
-    for (const entry of entries) {
-      kb += compileEntry(entry);
-      kb += '\n';
-    }
-  }
-
-  // Write untagged entries
-  if (untaggedEntries.length > 0) {
-    kb += `## General\n\n`;
-
-    for (const entry of untaggedEntries) {
-      kb += compileEntry(entry);
-      kb += '\n';
-    }
-  }
-
-  await writeKB(projectId, kb);
-}
-
-function compileEntry(entry: Entry): string {
-  let md = `### ${entry.data.title}\n\n`;
-
-  if (entry.data.date_detected) {
-    md += `**Date:** ${entry.data.date_detected}\n\n`;
-  }
-
-  md += '**Facts:**\n\n';
-  for (const fact of entry.data.extracted_facts) {
-    md += `- ${fact}\n`;
-  }
-  md += '\n';
-
-  if (entry.data.entities && entry.data.entities.length > 0) {
-    md += '**Entities:** ';
-    md += entry.data.entities.join(', ');
-    md += '\n\n';
-  }
-
-  if (entry.data.sources && entry.data.sources.length > 0) {
-    md += '**Sources:**\n\n';
-    for (const source of entry.data.sources) {
-      md += `- ${source}\n`;
-    }
-    md += '\n';
-  }
-
-  if (entry.data.verification_note) {
-    md += `> ⚠️ ${entry.data.verification_note}\n\n`;
-  }
-
-  md += `*Entry ID: ${entry.id}*\n\n`;
-  md += '---\n\n';
-
-  return md;
+  await writeKBIndex(projectId, lines.join('\n'));
 }
 
 /**
@@ -108,7 +54,7 @@ export async function detectConflicts(projectId: string): Promise<string[]> {
 
   const conflicts: string[] = [];
 
-  // Simple conflict detection: look for entries with overlapping entities or similar titles
+  // Simple conflict detection: look for entries with duplicate titles
   for (let i = 0; i < activeEntries.length; i++) {
     for (let j = i + 1; j < activeEntries.length; j++) {
       const entry1 = activeEntries[i];
@@ -121,17 +67,6 @@ export async function detectConflicts(projectId: string): Promise<string[]> {
       if (title1 === title2) {
         conflicts.push(
           `Duplicate titles: "${entry1.data.title}" (${entry1.id}) and "${entry2.data.title}" (${entry2.id})`
-        );
-      }
-
-      // Check for overlapping entities
-      const entities1 = new Set(entry1.data.entities || []);
-      const entities2 = new Set(entry2.data.entities || []);
-      const overlap = [...entities1].filter(e => entities2.has(e));
-
-      if (overlap.length > 0) {
-        conflicts.push(
-          `Overlapping entities in "${entry1.data.title}" (${entry1.id}) and "${entry2.data.title}" (${entry2.id}): ${overlap.join(', ')}`
         );
       }
     }

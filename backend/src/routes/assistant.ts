@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { callLLM } from '../services/llm';
-import { readKB, getProject } from '../services/storage';
+import { getProject, listEntries } from '../services/storage';
+import { retrieveRelevantEntries, formatRetrievedKnowledge } from '../services/retrieval';
 import {
   AssistantResponseSchema,
   EducationResponseSchema,
@@ -26,14 +27,42 @@ router.post('/mod', async (req, res, next) => {
       throw createError('userInput is required', 400);
     }
 
-    // Load KB if project specified
+    // Load KB using RAG if project specified
     let knowledge = '';
+    let retrievalInfo = null;
+
     if (projectId) {
       const project = await getProject(projectId);
       if (!project) {
         throw createError('Project not found', 404);
       }
-      knowledge = await readKB(projectId);
+
+      // RAG retrieval
+      const retrieval = await retrieveRelevantEntries(projectId, userInput);
+
+      if (retrieval.fallback || retrieval.entries.length === 0) {
+        // Fallback: load all entries directly
+        const allEntries = await listEntries(projectId);
+        const activeEntries = allEntries.filter(e => !e.deprecated);
+        knowledge = formatRetrievedKnowledge(activeEntries);
+        const sources = activeEntries
+          .flatMap((e) => e.data.sources || [])
+          .filter((s): s is string => !!s);
+        retrievalInfo = { fallback: true, entryCount: activeEntries.length, sources };
+      } else {
+        knowledge = formatRetrievedKnowledge(retrieval.entries);
+        // Collect sources from retrieved entries
+        const sources = retrieval.entries
+          .flatMap((e) => e.data.sources || [])
+          .filter((s): s is string => !!s);
+        retrievalInfo = {
+          fallback: false,
+          entryCount: retrieval.entries.length,
+          entryIds: retrieval.entryIds,
+          reasoning: retrieval.reasoning,
+          sources,
+        };
+      }
     }
 
     // Build user prompt
@@ -48,6 +77,7 @@ router.post('/mod', async (req, res, next) => {
         userPrompt,
         systemPrompt: getModPrompt(knowledge),
         maxRetries: 1,
+        mode: 'mod',
       },
       AssistantResponseSchema
     );
@@ -56,7 +86,7 @@ router.post('/mod', async (req, res, next) => {
       throw createError(`LLM call failed: ${result.error}`, 500);
     }
 
-    res.json({ result: result.data });
+    res.json({ result: result.data, retrieval: retrievalInfo });
   } catch (error) {
     next(error);
   }
@@ -71,14 +101,42 @@ router.post('/education', async (req, res, next) => {
       throw createError('userInput is required', 400);
     }
 
-    // Load KB if project specified
+    // Load KB using RAG if project specified
     let knowledge = '';
+    let retrievalInfo = null;
+
     if (projectId) {
       const project = await getProject(projectId);
       if (!project) {
         throw createError('Project not found', 404);
       }
-      knowledge = await readKB(projectId);
+
+      // RAG retrieval
+      const retrieval = await retrieveRelevantEntries(projectId, userInput);
+
+      if (retrieval.fallback || retrieval.entries.length === 0) {
+        // Fallback: load all entries directly
+        const allEntries = await listEntries(projectId);
+        const activeEntries = allEntries.filter(e => !e.deprecated);
+        knowledge = formatRetrievedKnowledge(activeEntries);
+        const sources = activeEntries
+          .flatMap((e) => e.data.sources || [])
+          .filter((s): s is string => !!s);
+        retrievalInfo = { fallback: true, entryCount: activeEntries.length, sources };
+      } else {
+        knowledge = formatRetrievedKnowledge(retrieval.entries);
+        // Collect sources from retrieved entries
+        const sources = retrieval.entries
+          .flatMap((e) => e.data.sources || [])
+          .filter((s): s is string => !!s);
+        retrievalInfo = {
+          fallback: false,
+          entryCount: retrieval.entries.length,
+          entryIds: retrieval.entryIds,
+          reasoning: retrieval.reasoning,
+          sources,
+        };
+      }
     }
 
     // Build user prompt
@@ -93,6 +151,7 @@ router.post('/education', async (req, res, next) => {
         userPrompt,
         systemPrompt: getEducationPrompt(knowledge),
         maxRetries: 1,
+        mode: 'education',
       },
       EducationResponseSchema
     );
@@ -101,7 +160,7 @@ router.post('/education', async (req, res, next) => {
       throw createError(`LLM call failed: ${result.error}`, 500);
     }
 
-    res.json({ result: result.data });
+    res.json({ result: result.data, retrieval: retrievalInfo });
   } catch (error) {
     next(error);
   }

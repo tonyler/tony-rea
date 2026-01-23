@@ -32,18 +32,20 @@ export default function Assistant() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6">
       <Card>
         <div className="flex items-center gap-3 mb-6">
-          <h2 className="text-3xl font-hand font-bold text-ink-200">Assistant</h2>
-          <svg className="w-8 h-8 text-accent-orange transform rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-300/20 to-amber-500/20 border border-amber-400/30 flex items-center justify-center">
+            <svg className="w-4 h-4 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-display font-bold text-cream-50">Assistant</h2>
         </div>
 
         {/* Mode Selector */}
         <div className="mb-6">
-          <label className="block text-lg font-hand font-semibold text-ink-100 mb-3">Pick a mode →</label>
+          <label className="block text-sm font-medium text-smoke-50 mb-3 tracking-wide">Mode</label>
           <div className="flex gap-2">
             <Button
               variant={assistant.mode === 'mod' ? 'primary' : 'secondary'}
@@ -69,18 +71,18 @@ export default function Assistant() {
         {/* Project Selector (not for grammar mode) */}
         {assistant.mode !== 'grammar' && (
           <div className="mb-6">
-            <label className="block text-lg font-hand font-semibold text-ink-100 mb-3">
-              📁 Project (Optional)
+            <label className="block text-sm font-medium text-smoke-50 mb-2 tracking-wide">
+              Project (Optional)
             </label>
-            <ProjectSelector value={assistant.projectId} onChange={assistant.setProjectId} allowNone />
+            <ProjectSelector value={assistant.projectId} onChange={assistant.setProjectId} />
           </div>
         )}
 
         {/* Input Form */}
         <form onSubmit={assistant.handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-lg font-hand font-semibold text-ink-100 mb-3">
-              {assistant.mode === 'grammar' ? '✍️ Text' : '💬 Input'}
+            <label className="block text-sm font-medium text-smoke-50 mb-2 tracking-wide">
+              {assistant.mode === 'grammar' ? 'Text' : 'Input'}
             </label>
             <textarea
               value={assistant.userInput}
@@ -98,16 +100,17 @@ export default function Assistant() {
               <button
                 type="button"
                 onClick={() => assistant.setShowContext(!assistant.showContext)}
-                className="text-sm text-primary-600 hover:text-primary-700 mb-2"
+                className="text-sm text-amber-300 hover:text-amber-200 transition-colors mb-2 flex items-center gap-1"
               >
-                {assistant.showContext ? '− Hide' : '+ Add'} Context
+                <span className="text-lg leading-none">{assistant.showContext ? '−' : '+'}</span>
+                {assistant.showContext ? 'Hide' : 'Add'} Context
               </button>
               {assistant.showContext && (
                 <textarea
                   value={assistant.context}
                   onChange={(e) => assistant.setContext(e.target.value)}
                   placeholder="Add additional context or information..."
-                  className="textarea"
+                  className="textarea animate-slide-down"
                   rows={4}
                   disabled={assistant.loading}
                 />
@@ -130,58 +133,69 @@ export default function Assistant() {
 
       {/* Error State */}
       {assistant.error && (
-        <Card className="border-red-300 bg-red-50">
-          <p className="text-red-800">
-            <strong>Error:</strong> {assistant.error}
-          </p>
+        <Card className="!border-coral-500/30 !bg-coral-500/5">
+          <div className="flex items-start gap-3">
+            <div className="w-5 h-5 rounded-full bg-coral-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg className="w-3 h-3 text-coral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <p className="text-coral-400 text-sm">
+              <strong className="font-semibold">Error:</strong> {assistant.error}
+            </p>
+          </div>
         </Card>
       )}
 
-      {/* Result Display */}
+      {/* Result Display - Mod Mode */}
       {assistant.result && assistant.mode === 'mod' && (
         <Card>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-2xl font-hand font-bold text-ink-200 sketch-underline">Moderator Reply</h3>
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-display font-semibold text-cream-50">Moderator Reply</h3>
               <CopyButton text={(assistant.result as AssistantResponse).reply} />
             </div>
 
-            <div className="prose max-w-none bg-gray-50 p-4 rounded-lg">
+            <div className="result-box">
               {(assistant.result as AssistantResponse).reply}
             </div>
 
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-600">Confidence:</span>
+            {/* Sources from retrieved entries */}
+            {assistant.retrieval?.sources && assistant.retrieval.sources.length > 0 && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-smoke-200">Source:</span>
+                {assistant.retrieval.sources.map((source, i) => (
+                  <a
+                    key={i}
+                    href={source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-amber-300 hover:text-amber-200 hover:underline transition-colors truncate max-w-md"
+                  >
+                    {source.includes('discord.com') ? 'Discord' : new URL(source).hostname}
+                  </a>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 text-sm">
+              <span className="text-smoke-100">Confidence:</span>
               <span className={`font-medium ${
                 (assistant.result as AssistantResponse).confidence === 'high'
-                  ? 'text-green-600'
+                  ? 'badge-success'
                   : (assistant.result as AssistantResponse).confidence === 'medium'
-                  ? 'text-yellow-600'
-                  : 'text-red-600'
+                  ? 'badge-warning'
+                  : 'badge-danger'
               }`}>
                 {(assistant.result as AssistantResponse).confidence}
               </span>
             </div>
 
-            {(assistant.result as AssistantResponse).used_sources && (assistant.result as AssistantResponse).used_sources!.length > 0 && (
-              <div>
-                <h4 className="font-medium text-gray-900 mb-2">Sources:</h4>
-                <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
-                  {(assistant.result as AssistantResponse).used_sources!.map((source, i) => (
-                    <li key={i}>
-                      <a href={source} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
-                        {source}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
 
             {(assistant.result as AssistantResponse).assumptions && (assistant.result as AssistantResponse).assumptions!.length > 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 p-3 rounded">
-                <h4 className="font-medium text-yellow-900 mb-1">Assumptions:</h4>
-                <ul className="list-disc list-inside space-y-1 text-sm text-yellow-800">
+              <div className="alert-warning">
+                <h4 className="font-medium text-cream-100 mb-2">Assumptions</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm text-cream-200">
                   {(assistant.result as AssistantResponse).assumptions!.map((assumption, i) => (
                     <li key={i}>{assumption}</li>
                   ))}
@@ -190,87 +204,138 @@ export default function Assistant() {
             )}
 
             {(assistant.result as AssistantResponse).follow_up_question && (
-              <div className="bg-blue-50 border border-blue-200 p-3 rounded">
-                <h4 className="font-medium text-blue-900 mb-1">Follow-up Question:</h4>
-                <p className="text-sm text-blue-800">{(assistant.result as AssistantResponse).follow_up_question}</p>
+              <div className="alert-info">
+                <h4 className="font-medium text-cream-100 mb-2">Follow-up Question</h4>
+                <p className="text-sm text-cream-200">{(assistant.result as AssistantResponse).follow_up_question}</p>
               </div>
             )}
           </div>
         </Card>
       )}
 
-      {assistant.result && assistant.mode === 'education' && (
-        <Card variant="blue">
-          <h3 className="text-2xl font-hand font-bold text-ink-200 sketch-underline mb-6">📚 Education Mode</h3>
+      {/* Result Display - Education Mode */}
+      {assistant.result && assistant.mode === 'education' && (() => {
+        const edu = assistant.result as EducationResponse;
+        return (
+          <Card>
+            <h3 className="text-lg font-display font-semibold text-cream-50 mb-6">Education Mode</h3>
 
-          <div className="space-y-6">
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Summary</h4>
-              <p className="text-gray-700">{(assistant.result as EducationResponse).summary}</p>
+            <div className="space-y-6">
+              {edu.summary && (
+                <div>
+                  <h4 className="font-medium text-cream-100 mb-2">Summary</h4>
+                  <p className="text-cream-200 leading-relaxed">{edu.summary}</p>
+                </div>
+              )}
+
+              {edu.key_concepts && edu.key_concepts.length > 0 && (
+                <>
+                  <div className="divider" />
+                  <div>
+                    <h4 className="font-medium text-cream-100 mb-2">Key Concepts</h4>
+                    <ul className="list-disc list-inside space-y-1.5 text-cream-200">
+                      {edu.key_concepts.map((concept, i) => (
+                        <li key={i}>{concept}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
+
+              {edu.recommended_answer_structure && (
+                <>
+                  <div className="divider" />
+                  <div>
+                    <h4 className="font-medium text-cream-100 mb-2">Recommended Answer Structure</h4>
+                    <p className="text-cream-200 leading-relaxed">{edu.recommended_answer_structure}</p>
+                  </div>
+                </>
+              )}
+
+              {edu.what_to_verify && edu.what_to_verify.length > 0 && (
+                <>
+                  <div className="divider" />
+                  <div>
+                    <h4 className="font-medium text-cream-100 mb-2">What to Verify</h4>
+                    <ul className="list-disc list-inside space-y-1.5 text-cream-200">
+                      {edu.what_to_verify.map((item, i) => (
+                        <li key={i}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
+
+              {edu.common_pitfalls && edu.common_pitfalls.length > 0 && (
+                <>
+                  <div className="divider" />
+                  <div>
+                    <h4 className="font-medium text-cream-100 mb-2">Common Pitfalls</h4>
+                    <ul className="list-disc list-inside space-y-1.5 text-cream-200">
+                      {edu.common_pitfalls.map((pitfall, i) => (
+                        <li key={i}>{pitfall}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
+
+              {edu.open_questions && edu.open_questions.length > 0 && (
+                <>
+                  <div className="divider" />
+                  <div>
+                    <h4 className="font-medium text-cream-100 mb-2">Open Questions</h4>
+                    <ul className="list-disc list-inside space-y-1.5 text-cream-200">
+                      {edu.open_questions.map((question, i) => (
+                        <li key={i}>{question}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
+
+              {/* Sources from retrieved entries */}
+              {assistant.retrieval?.sources && assistant.retrieval.sources.length > 0 && (
+                <>
+                  <div className="divider" />
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-smoke-200">Source:</span>
+                    {assistant.retrieval.sources.map((source, i) => (
+                      <a
+                        key={i}
+                        href={source}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-amber-300 hover:text-amber-200 hover:underline transition-colors truncate max-w-md"
+                      >
+                        {source.includes('discord.com') ? 'Discord' : new URL(source).hostname}
+                      </a>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
+          </Card>
+        );
+      })()}
 
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Key Concepts</h4>
-              <ul className="list-disc list-inside space-y-1 text-gray-700">
-                {(assistant.result as EducationResponse).key_concepts.map((concept, i) => (
-                  <li key={i}>{concept}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Recommended Answer Structure</h4>
-              <p className="text-gray-700">{(assistant.result as EducationResponse).recommended_answer_structure}</p>
-            </div>
-
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">What to Verify</h4>
-              <ul className="list-disc list-inside space-y-1 text-gray-700">
-                {(assistant.result as EducationResponse).what_to_verify.map((item, i) => (
-                  <li key={i}>{item}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-medium text-gray-900 mb-2">Common Pitfalls</h4>
-              <ul className="list-disc list-inside space-y-1 text-gray-700">
-                {(assistant.result as EducationResponse).common_pitfalls.map((pitfall, i) => (
-                  <li key={i}>{pitfall}</li>
-                ))}
-              </ul>
-            </div>
-
-            {(assistant.result as EducationResponse).open_questions && (assistant.result as EducationResponse).open_questions!.length > 0 && (
-              <div>
-                <h4 className="font-medium text-gray-900 mb-2">Open Questions</h4>
-                <ul className="list-disc list-inside space-y-1 text-gray-700">
-                  {(assistant.result as EducationResponse).open_questions!.map((question, i) => (
-                    <li key={i}>{question}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </Card>
-      )}
-
+      {/* Result Display - Grammar Mode */}
       {assistant.result && assistant.mode === 'grammar' && (
-        <Card variant="green">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-2xl font-hand font-bold text-ink-200 sketch-underline">✨ Corrected Text</h3>
+        <Card>
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-display font-semibold text-cream-50">Corrected Text</h3>
               <CopyButton text={(assistant.result as GrammarResponse).corrected_text} />
             </div>
 
-            <div className="prose max-w-none bg-gray-50 p-4 rounded-lg">
+            <div className="result-box">
               {(assistant.result as GrammarResponse).corrected_text}
             </div>
 
             {(assistant.result as GrammarResponse).changes_made && (assistant.result as GrammarResponse).changes_made!.length > 0 && (
               <div>
-                <h4 className="font-medium text-gray-900 mb-2">Changes Made:</h4>
-                <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+                <h4 className="font-medium text-cream-100 mb-2">Changes Made</h4>
+                <ul className="list-disc list-inside space-y-1.5 text-sm text-cream-200">
                   {(assistant.result as GrammarResponse).changes_made!.map((change, i) => (
                     <li key={i}>{change}</li>
                   ))}

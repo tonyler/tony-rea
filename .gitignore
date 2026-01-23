@@ -18,6 +18,7 @@ build/
 data/
 *.log
 logs/
+discord-bot/logs/
 
 # OS
 .DS_Store

@@ -69,10 +69,10 @@ export async function createProject(name: string, description?: string): Promise
     JSON.stringify(meta, null, 2)
   );
 
-  // Create empty kb.md
+  // Create empty kb-index.md
   await fs.writeFile(
-    path.join(projectDir, 'kb.md'),
-    '# Knowledge Base\n\nNo entries yet.\n'
+    path.join(projectDir, 'kb-index.md'),
+    ''
   );
 
   return meta;
@@ -111,6 +111,37 @@ export async function getProject(projectId: string): Promise<ProjectMeta | null>
   }
 }
 
+// Helper function to slugify a title
+function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 50); // Limit length
+}
+
+// Helper function to generate unique entry ID from title
+async function generateUniqueEntryId(entriesDir: string, title: string): Promise<string> {
+  const baseSlug = slugifyTitle(title);
+  let slug = baseSlug;
+  let counter = 1;
+
+  // Check if file exists, if so append counter
+  while (true) {
+    try {
+      await fs.access(path.join(entriesDir, `${slug}.json`));
+      // File exists, try next counter
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+    } catch {
+      // File doesn't exist, we can use this slug
+      break;
+    }
+  }
+
+  return slug;
+}
+
 // Entry operations
 export async function createEntry(
   projectId: string,
@@ -125,7 +156,8 @@ export async function createEntry(
     throw new Error('Project not found');
   }
 
-  const entryId = `entry-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  // Generate slugified ID from title
+  const entryId = await generateUniqueEntryId(entriesDir, data.title);
   const entry: Entry = {
     id: entryId,
     created_at: new Date().toISOString(),
@@ -236,6 +268,35 @@ export async function readKB(projectId: string): Promise<string> {
 export async function writeKB(projectId: string, content: string): Promise<void> {
   const kbPath = path.join(PROJECTS_DIR, projectId, 'kb.md');
   await fs.writeFile(kbPath, content);
+}
+
+// KB Index operations (for RAG)
+export async function readKBIndex(projectId: string): Promise<string> {
+  try {
+    const indexPath = path.join(PROJECTS_DIR, projectId, 'kb-index.md');
+    return await fs.readFile(indexPath, 'utf-8');
+  } catch (error) {
+    return '';
+  }
+}
+
+export async function writeKBIndex(projectId: string, content: string): Promise<void> {
+  const indexPath = path.join(PROJECTS_DIR, projectId, 'kb-index.md');
+  await fs.writeFile(indexPath, content);
+}
+
+// Batch load entries by IDs (for RAG retrieval)
+export async function getEntriesByIds(projectId: string, entryIds: string[]): Promise<Entry[]> {
+  const entries: Entry[] = [];
+
+  for (const entryId of entryIds) {
+    const entry = await getEntry(projectId, entryId);
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+
+  return entries;
 }
 
 // Thread operations

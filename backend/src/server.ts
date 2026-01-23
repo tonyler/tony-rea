@@ -1,17 +1,13 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import * as path from 'path';
 import { errorHandler } from './middleware/error-handler';
 import { apiLimiter } from './middleware/rate-limit';
 import { initializeLLM } from './services/llm';
 import { initializeStorage } from './services/storage';
-
-// Load environment variables
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+import { env, appConfig } from './config';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
@@ -35,15 +31,17 @@ import assistantRoutes from './routes/assistant';
 import feedRoutes from './routes/feed';
 import threadsRoutes from './routes/threads';
 import projectsRoutes from './routes/projects';
+import tagsRoutes from './routes/tags';
 
 // Register routes
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/feed', feedRoutes);
 app.use('/api/threads', threadsRoutes);
 app.use('/api/projects', projectsRoutes);
+app.use('/api/tags', tagsRoutes);
 
 // Serve frontend static files in production
-if (process.env.NODE_ENV === 'production') {
+if (appConfig.isProduction) {
   const frontendDist = path.join(__dirname, '../../frontend/dist');
   app.use(express.static(frontendDist));
 
@@ -59,20 +57,15 @@ app.use(errorHandler);
 // Initialize services
 async function startServer() {
   try {
-    // Validate required environment variables
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is required');
-    }
-
     // Initialize services
-    initializeLLM(process.env.OPENAI_API_KEY);
+    initializeLLM(env.OPENAI_API_KEY);
     await initializeStorage();
 
     // Start server
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`Health check: http://localhost:${PORT}/api/health`);
+    app.listen(appConfig.port, () => {
+      console.log(`Server running on port ${appConfig.port}`);
+      console.log(`Environment: ${appConfig.nodeEnv}`);
+      console.log(`Health check: http://localhost:${appConfig.port}/api/health`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

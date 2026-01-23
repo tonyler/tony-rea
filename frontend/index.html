@@ -4,10 +4,39 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tony & Rea - Internal LLM Tool</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Patrick+Hand&family=Comic+Neue:wght@300;400;700&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+    <meta name="theme-color" content="#0c0c0d" />
+    <title>Tony & Rea</title>
+
+    <!-- Satoshi Font from Fontshare -->
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+
+    <!-- JetBrains Mono for code -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <style>
+      /* Critical CSS for faster perceived loading */
+      html {
+        background-color: #0c0c0d;
+        color-scheme: dark;
+      }
+
+      body {
+        background-color: #0c0c0d;
+        color: #f5f3ef;
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      /* Prevent FOUC */
+      #root {
+        opacity: 0;
+        animation: rootFadeIn 0.3s ease-out 0.1s forwards;
+      }
+
+      @keyframes rootFadeIn {
+        to { opacity: 1; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { Entry } from '../types';
-import { feedApi } from '../../../services/api';
+import { feedApi, type MCPResource, type MCPIngestResult } from '../../../services/api';
 
-export type FeedView = 'ingest' | 'entries' | 'kb';
+export type FeedView = 'ingest' | 'entries' | 'kb' | 'mcp';
 
 export function useFeed() {
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -26,6 +26,17 @@ export function useFeed() {
   // Update state
   const [updateInstruction, setUpdateInstruction] = useState('');
   const [updating, setUpdating] = useState(false);
+
+  // MCP state
+  const [mcpUrl, setMcpUrl] = useState('');
+  const [mcpResources, setMcpResources] = useState<MCPResource[]>([]);
+  const [mcpSelectedResources, setMcpSelectedResources] = useState<string[]>([]);
+  const [mcpExploring, setMcpExploring] = useState(false);
+  const [mcpIngesting, setMcpIngesting] = useState(false);
+  const [mcpIngestResults, setMcpIngestResults] = useState<{
+    summary: { total: number; success: number; failed: number };
+    results: MCPIngestResult[];
+  } | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -138,6 +149,63 @@ export function useFeed() {
     }
   };
 
+  // MCP handlers
+  const handleMcpExplore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mcpUrl.trim()) return;
+
+    setMcpExploring(true);
+    setError(null);
+    setMcpResources([]);
+    setMcpSelectedResources([]);
+    setMcpIngestResults(null);
+
+    try {
+      const { resources } = await feedApi.mcpExplore(mcpUrl);
+      setMcpResources(resources);
+      // Select all by default
+      setMcpSelectedResources(resources.map(r => r.uri));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect to MCP server');
+    } finally {
+      setMcpExploring(false);
+    }
+  };
+
+  const handleMcpIngest = async () => {
+    if (!projectId || !mcpUrl.trim() || mcpSelectedResources.length === 0) return;
+
+    setMcpIngesting(true);
+    setError(null);
+    setMcpIngestResults(null);
+
+    try {
+      const result = await feedApi.mcpIngest(mcpUrl, projectId, mcpSelectedResources);
+      setMcpIngestResults(result);
+
+      // Reload entries
+      loadEntries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'MCP ingestion failed');
+    } finally {
+      setMcpIngesting(false);
+    }
+  };
+
+  const toggleMcpResource = (uri: string) => {
+    setMcpSelectedResources(prev =>
+      prev.includes(uri) ? prev.filter(u => u !== uri) : [...prev, uri]
+    );
+  };
+
+  const selectAllMcpResources = () => {
+    setMcpSelectedResources(mcpResources.map(r => r.uri));
+  };
+
+  const deselectAllMcpResources = () => {
+    setMcpSelectedResources([]);
+  };
+
   return {
     projectId,
     setProjectId,
@@ -164,5 +232,18 @@ export function useFeed() {
     handleDelete,
     loadEntries,
     loadKb,
+    // MCP
+    mcpUrl,
+    setMcpUrl,
+    mcpResources,
+    mcpSelectedResources,
+    mcpExploring,
+    mcpIngesting,
+    mcpIngestResults,
+    handleMcpExplore,
+    handleMcpIngest,
+    toggleMcpResource,
+    selectAllMcpResources,
+    deselectAllMcpResources,
   };
 }

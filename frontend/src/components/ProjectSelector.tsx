@@ -51,11 +51,16 @@ export default function ProjectSelector({ value, onChange, allowNone = false }: 
   };
 
   if (loading) {
-    return <div className="text-sm text-gray-500">Loading projects...</div>;
+    return (
+      <div className="flex items-center gap-3 text-sm text-smoke-100">
+        <div className="w-4 h-4 border-2 border-smoke-400/50 border-t-amber-300 rounded-full animate-spin" />
+        Loading projects...
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex gap-2">
         <select
           value={value || ''}
@@ -73,12 +78,12 @@ export default function ProjectSelector({ value, onChange, allowNone = false }: 
           ))}
         </select>
         <Button variant="secondary" onClick={() => setShowCreate(!showCreate)}>
-          {showCreate ? 'Cancel' : 'New'}
+          {showCreate ? 'Cancel' : '+ New'}
         </Button>
       </div>
 
       {showCreate && (
-        <form onSubmit={handleCreate} className="flex gap-2">
+        <form onSubmit={handleCreate} className="flex gap-2 animate-slide-down">
           <input
             type="text"
             value={newProjectName}
@@ -86,6 +91,7 @@ export default function ProjectSelector({ value, onChange, allowNone = false }: 
             placeholder="Project name"
             className="input flex-1"
             disabled={creating}
+            autoFocus
           />
           <Button type="submit" disabled={creating || !newProjectName.trim()}>
             {creating ? 'Creating...' : 'Create'}

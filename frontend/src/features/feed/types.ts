@@ -1,13 +1,11 @@
-// Feed types
+// Feed types - matches backend schema
 export interface FeedIngestResult {
   title: string;
+  full_content: string;
   date_detected?: string;
-  extracted_facts: string[];
-  entities?: string[];
   tags?: string[];
   sources?: string[];
   verification_note?: string;
-  suggested_kb_sections?: string[];
 }
 
 export interface Entry {
@@ -24,7 +22,7 @@ export interface KBPatchPlan {
   target_entry_ids: string[];
   new_entry?: {
     title: string;
-    extracted_facts: string[];
+    full_content: string;
     sources?: string[];
     tags?: string[];
   };

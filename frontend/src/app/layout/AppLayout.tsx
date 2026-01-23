@@ -11,20 +11,34 @@ interface AppLayoutProps {
 
 export default function AppLayout({ activeTab, onTabChange, children }: AppLayoutProps) {
   return (
-    <div className="min-h-screen">
-      <Header />
-      <TabNav activeTab={activeTab} onTabChange={onTabChange} />
+    <div className="min-h-screen bg-void-500 relative">
+      {/* Ambient background gradient */}
+      <div
+        className="fixed inset-0 pointer-events-none"
+        style={{
+          background: `
+            radial-gradient(ellipse 80% 50% at 50% -10%, rgba(249, 216, 115, 0.04) 0%, transparent 50%),
+            radial-gradient(ellipse 60% 40% at 100% 0%, rgba(249, 150, 80, 0.03) 0%, transparent 40%)
+          `
+        }}
+      />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {children}
-      </main>
+      <div className="relative z-10">
+        <Header />
+        <TabNav activeTab={activeTab} onTabChange={onTabChange} />
 
-      {/* Decorative doodles */}
-      <div className="fixed bottom-8 right-8 pointer-events-none opacity-20">
-        <svg className="w-24 h-24 text-accent-blue transform rotate-12" viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="35" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="5,5" />
-          <path d="M 30 30 L 50 50 M 50 50 L 70 30" stroke="currentColor" strokeWidth="3" fill="none" />
-        </svg>
+        <main className="max-w-5xl mx-auto px-6 lg:px-8 py-10">
+          <div className="animate-slide-up">
+            {children}
+          </div>
+        </main>
+
+        {/* Minimal footer */}
+        <footer className="mt-auto py-8 text-center">
+          <p className="text-xs text-smoke-200/50 tracking-widest uppercase">
+            Tony & Rea
+          </p>
+        </footer>
       </div>
     </div>
   );

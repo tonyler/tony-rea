@@ -1,27 +1,38 @@
 export default function LoadingSpinner({ message = 'Loading...' }: { message?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-12">
-      <div className="relative w-16 h-16">
-        <svg className="w-16 h-16 animate-spin text-accent-orange" viewBox="0 0 50 50">
+    <div className="flex flex-col items-center justify-center py-16">
+      <div className="relative w-12 h-12">
+        {/* Outer ring */}
+        <div className="absolute inset-0 border-2 border-smoke-400/30 rounded-full" />
+
+        {/* Spinning arc with glow */}
+        <svg className="w-12 h-12 animate-spin-slow" viewBox="0 0 48 48">
+          <defs>
+            <linearGradient id="spinnerGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="transparent" />
+              <stop offset="50%" stopColor="#f9d873" />
+              <stop offset="100%" stopColor="#f5c638" />
+            </linearGradient>
+          </defs>
           <circle
-            cx="25"
-            cy="25"
-            r="20"
+            cx="24"
+            cy="24"
+            r="21"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="4"
+            stroke="url(#spinnerGradient)"
+            strokeWidth="2"
             strokeDasharray="80, 200"
             strokeLinecap="round"
           />
         </svg>
-        <svg className="absolute inset-0 w-16 h-16 text-accent-yellow transform rotate-45" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" opacity="0.5" />
-        </svg>
+
+        {/* Center dot */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-amber-300/60 animate-pulse-slow" />
+        </div>
       </div>
-      <p className="mt-4 font-hand text-xl text-ink-100 transform -rotate-1">{message}</p>
-      <svg className="mt-2 w-24 h-2" viewBox="0 0 100 10">
-        <path d="M 0,5 Q 25,0 50,5 T 100,5" fill="none" stroke="currentColor" strokeWidth="2" className="text-accent-blue" />
-      </svg>
+
+      <p className="mt-5 text-sm text-smoke-100 tracking-wide">{message}</p>
     </div>
   );
 }

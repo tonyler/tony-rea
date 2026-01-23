@@ -4,9 +4,9 @@ import { z } from 'zod';
 export const AssistantResponseSchema = z.object({
   reply: z.string(),
   confidence: z.enum(['high', 'medium', 'low']),
-  used_sources: z.array(z.string()).optional(),
-  assumptions: z.array(z.string()).optional(),
-  follow_up_question: z.string().optional(),
+  used_sources: z.array(z.string()).nullable().optional(),
+  assumptions: z.array(z.string()).nullable().optional(),
+  follow_up_question: z.string().nullable().optional(),
 });
 
 export type AssistantResponse = z.infer<typeof AssistantResponseSchema>;
@@ -31,19 +31,25 @@ export const GrammarResponseSchema = z.object({
 
 export type GrammarResponse = z.infer<typeof GrammarResponseSchema>;
 
-// Feed Ingest Result
+// Feed Ingest Result - stores full original content
 export const FeedIngestResultSchema = z.object({
   title: z.string(),
-  date_detected: z.string().optional(),
-  extracted_facts: z.array(z.string()),
-  entities: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
-  sources: z.array(z.string()).optional(),
-  verification_note: z.string().optional(),
-  suggested_kb_sections: z.array(z.string()).optional(),
+  full_content: z.string(),
+  date_detected: z.string().nullable().optional(),
+  tags: z.array(z.string()).nullable().optional(),
+  suggested_new_tags: z.array(z.string()).nullable().optional(), // Tags not in predefined list
+  sources: z.array(z.string()).nullable().optional(),
+  verification_note: z.string().nullable().optional(),
 });
 
 export type FeedIngestResult = z.infer<typeof FeedIngestResultSchema>;
+
+// Feed Ingest Response - LLM returns array for multi-topic splitting
+export const FeedIngestResponseSchema = z.object({
+  entries: z.array(FeedIngestResultSchema),
+});
+
+export type FeedIngestResponse = z.infer<typeof FeedIngestResponseSchema>;
 
 // KB Patch Plan
 export const KBPatchPlanSchema = z.object({
@@ -52,7 +58,7 @@ export const KBPatchPlanSchema = z.object({
   target_entry_ids: z.array(z.string()),
   new_entry: z.object({
     title: z.string(),
-    extracted_facts: z.array(z.string()),
+    full_content: z.string(),
     sources: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
   }).optional(),
@@ -60,6 +66,14 @@ export const KBPatchPlanSchema = z.object({
 });
 
 export type KBPatchPlan = z.infer<typeof KBPatchPlanSchema>;
+
+// Retrieval Response (for RAG system)
+export const RetrievalResponseSchema = z.object({
+  relevant_entry_ids: z.array(z.string()),
+  reasoning: z.string(),
+});
+
+export type RetrievalResponse = z.infer<typeof RetrievalResponseSchema>;
 
 // Thread Result
 export const ThreadResultSchema = z.object({
