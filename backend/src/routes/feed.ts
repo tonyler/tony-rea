@@ -117,11 +117,13 @@ router.post('/ingest', async (req, res, next) => {
     }
 
     // Call LLM to create entries (may split into multiple if multi-topic)
+    // maxTokens set high to handle large file ingestion
     const result = await callLLM(
       {
         userPrompt,
         systemPrompt: getFeedIngestPrompt(),
         maxRetries: 1,
+        maxTokens: 16384,
       },
       FeedIngestResponseSchema
     );
@@ -422,11 +424,13 @@ router.post('/mcp/ingest', async (req, res, next) => {
           const userPrompt = `Content to process:\n\n${textContent}\n\nProvided sources:\n${resource.uri}`;
 
           // Call LLM to create entries (may split into multiple if multi-topic)
+          // maxTokens set high to handle large file ingestion
           const llmResult = await callLLM(
             {
               userPrompt,
               systemPrompt: getFeedIngestPrompt(),
               maxRetries: 1,
+              maxTokens: 16384,
             },
             FeedIngestResponseSchema
           );

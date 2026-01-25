@@ -1,4 +1,6 @@
-export const API_BASE = '/api';
+// Use base URL from Vite config (e.g., '/rea/' in production)
+const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
+export const API_BASE = `${baseUrl}/api`;
 
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {

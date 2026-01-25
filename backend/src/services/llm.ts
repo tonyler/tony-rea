@@ -17,6 +17,7 @@ export interface LLMCallOptions {
   model?: string;
   temperature?: number;
   maxRetries?: number;
+  maxTokens?: number;
   mode?: LLMMode;
 }
 
@@ -34,6 +35,7 @@ export async function callLLM<T>(
     model = llmConfig.defaultModel,
     temperature,
     maxRetries = llmConfig.maxRetries,
+    maxTokens,
     mode,
   } = options;
 
@@ -51,6 +53,7 @@ export async function callLLM<T>(
           { role: 'user', content: userPrompt },
         ],
         temperature: finalTemperature,
+        ...(maxTokens && { max_tokens: maxTokens }),
       });
 
       const content = response.choices[0]?.message?.content;
