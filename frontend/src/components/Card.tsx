@@ -17,7 +17,7 @@ export default function Card({
   const glowClass = glow ? 'hover:shadow-glow' : '';
 
   return (
-    <div className={`${baseClass} ${glowClass} ${className}`}>
+    <div className={`${baseClass} ${glowClass} overflow-hidden ${className}`}>
       {children}
     </div>
   );

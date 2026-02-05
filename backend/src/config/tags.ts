@@ -12,12 +12,25 @@ import * as path from 'path';
 export const BASE_PREDEFINED_TAGS = [
   // Platform & Social
   'Twitter',
+  'X',
   'Discord',
   'Telegram',
   'Spaces',
   'AMA',
   'Raids',
   'Social Media',
+  'Medium',
+  'TaskOn',
+  'Galxe',
+  'Zealy',
+  'Spotify',
+  'YouTube',
+  'Reddit',
+  'Mirror',
+  'Substack',
+  'LinkedIn',
+  'Farcaster',
+  'Lens',
 
   // Content Types
   'Announcement',
@@ -402,6 +415,28 @@ export function normalizeToPrefinedTag(tag: string): string | null {
   const allTags = getAllTags();
   const match = allTags.find(t => t.toLowerCase() === tag.toLowerCase());
   return match || null;
+}
+
+/**
+ * Build a prompt for LLM to fuzzy-match user tags to predefined ones.
+ * Returns null if no unmatched tags need normalization.
+ */
+export function buildTagNormalizationPrompt(
+  unmatchedTags: string[]
+): { system: string; user: string } | null {
+  if (unmatchedTags.length === 0) return null;
+
+  const allTags = getAllTags();
+  const system = `You are a tag normalization assistant. Given a list of user-provided tags that don't exactly match our predefined tag list, find the closest matching predefined tag for each one. Only map a tag if you're confident it's a fuzzy match (e.g., "ics" -> "ICS", "defi" -> "DeFi", "nft" -> "NFT", "twitter spaces" -> "Spaces"). If no predefined tag is a reasonable match, return the original tag unchanged.
+
+Predefined tags: ${allTags.join(', ')}`;
+
+  const user = `Map these tags to predefined ones where possible. Return JSON:
+{ "mappings": { "original_tag": "matched_predefined_tag_or_original" } }
+
+Tags to normalize: ${unmatchedTags.join(', ')}`;
+
+  return { system, user };
 }
 
 // Legacy export for compatibility

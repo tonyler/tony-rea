@@ -4,6 +4,7 @@ import {
   createEntry,
   listEntries,
   getEntry,
+  updateEntry,
   deprecateEntry,
   hardDeleteEntry,
   getProject,
@@ -18,7 +19,8 @@ import { getFeedUpdatePrompt } from '../prompts/feed-update';
 import { createError } from '../middleware/error-handler';
 import { llmLimiter } from '../middleware/rate-limit';
 import { getMCPClient } from '../services/mcp-client';
-import { PREDEFINED_TAGS, normalizeToPrefinedTag, addPendingTag } from '../config/tags';
+import { PREDEFINED_TAGS, normalizeToPrefinedTag, addPendingTag, buildTagNormalizationPrompt } from '../config/tags';
+import { TagNormalizationSchema } from '../schemas/output-schemas';
 
 const router = Router();
 
@@ -94,10 +96,15 @@ function normalizeTags(
 // POST /api/feed/ingest - Ingest new knowledge
 router.post('/ingest', async (req, res, next) => {
   try {
-    const { content, sources, projectId } = req.body;
+    const { content, sources, projectId, tags: userTags } = req.body;
 
     if (!content || typeof content !== 'string') {
       throw createError('content is required', 400);
+    }
+
+    const MAX_CONTENT_LENGTH = 50_000;
+    if (content.length > MAX_CONTENT_LENGTH) {
+      throw createError(`Content too large (${content.length} chars, max ${MAX_CONTENT_LENGTH})`, 400);
     }
 
     if (!projectId || typeof projectId !== 'string') {
@@ -110,10 +117,13 @@ router.post('/ingest', async (req, res, next) => {
       throw createError('Project not found', 404);
     }
 
-    // Build user prompt
+    // Build user prompt with user-specified tags hint
     let userPrompt = `Content to process:\n\n${content}`;
     if (sources && Array.isArray(sources) && sources.length > 0) {
       userPrompt += `\n\nProvided sources:\n${sources.join('\n')}`;
+    }
+    if (userTags && Array.isArray(userTags) && userTags.length > 0) {
+      userPrompt += `\n\nUser-specified tags (MUST include these): ${userTags.join(', ')}`;
     }
 
     // Call LLM to create entries (may split into multiple if multi-topic)
@@ -141,8 +151,62 @@ router.post('/ingest', async (req, res, next) => {
       if (sources && Array.isArray(sources) && sources.length > 0 && (!entryData.sources || entryData.sources.length === 0)) {
         entryData.sources = sources;
       }
+
+      // Merge user-specified tags with LLM-generated tags
+      const mergedTags = [...(entryData.tags || [])];
+      if (userTags && Array.isArray(userTags)) {
+        for (const tag of userTags) {
+          if (!mergedTags.some(t => t.toLowerCase() === tag.toLowerCase())) {
+            mergedTags.push(tag);
+          }
+        }
+      }
+
+      // LLM fuzzy-match unmatched tags to predefined ones
+      const unmatchedTags = mergedTags.filter(t => !normalizeToPrefinedTag(t));
+      if (unmatchedTags.length > 0) {
+        const normPrompt = buildTagNormalizationPrompt(unmatchedTags);
+        if (normPrompt) {
+          try {
+            const normResult = await callLLM(
+              { userPrompt: normPrompt.user, systemPrompt: normPrompt.system, maxRetries: 0, maxTokens: 1024 },
+              TagNormalizationSchema
+            );
+            if (normResult.success && normResult.data.mappings) {
+              for (let i = 0; i < mergedTags.length; i++) {
+                const mapped = normResult.data.mappings[mergedTags[i]];
+                if (mapped && mapped !== mergedTags[i]) {
+                  mergedTags[i] = mapped;
+                }
+              }
+            }
+          } catch {
+            // Normalization is best-effort; continue with original tags
+          }
+        }
+      }
+
       // Normalize and validate tags against predefined list
-      const { tags, invalidTags } = normalizeTags(entryData.tags, entryData.suggested_new_tags);
+      const { tags, invalidTags } = normalizeTags(mergedTags, entryData.suggested_new_tags);
+
+      // Preserve user-provided tags even if not in predefined list
+      if (userTags && Array.isArray(userTags)) {
+        for (const tag of userTags) {
+          if (!tags.some(t => t.toLowerCase() === tag.toLowerCase())) {
+            tags.push(tag);
+          }
+        }
+      }
+
+      // Ensure every entry has at least one tag
+      if (tags.length === 0) {
+        if (userTags && Array.isArray(userTags) && userTags.length > 0) {
+          tags.push(...userTags);
+        } else {
+          tags.push('Announcement');
+        }
+      }
+
       entryData.tags = tags;
 
       // Track suggested new tags for review and add to pending
@@ -304,6 +368,44 @@ router.get('/entries/:projectId', async (req, res, next) => {
     const entries = await listEntries(projectId);
 
     res.json({ entries });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/feed/entries/:projectId/:entryId/tags - Update entry tags
+router.patch('/entries/:projectId/:entryId/tags', async (req, res, next) => {
+  try {
+    const { projectId, entryId } = req.params;
+    const { tags } = req.body;
+
+    if (!tags || !Array.isArray(tags) || tags.length === 0) {
+      throw createError('tags array is required and must not be empty', 400);
+    }
+
+    const project = await getProject(projectId);
+    if (!project) {
+      throw createError('Project not found', 404);
+    }
+
+    const entry = await getEntry(projectId, entryId);
+    if (!entry) {
+      throw createError('Entry not found', 404);
+    }
+
+    const { tags: normalizedTags } = normalizeTags(tags);
+
+    // Preserve any tags not in predefined list (user custom tags)
+    const finalTags = [...normalizedTags];
+    for (const tag of tags) {
+      if (!finalTags.some(t => t.toLowerCase() === tag.toLowerCase())) {
+        finalTags.push(tag);
+      }
+    }
+
+    const updated = await updateEntry(projectId, entryId, { tags: finalTags });
+
+    res.json({ entry: updated });
   } catch (error) {
     next(error);
   }

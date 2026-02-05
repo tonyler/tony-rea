@@ -322,22 +322,22 @@ export default function Assistant() {
       {/* Result Display - Grammar Mode */}
       {assistant.result && assistant.mode === 'grammar' && (
         <Card>
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
+          <div className="space-y-5 min-w-0">
+            <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
               <h3 className="text-lg font-display font-semibold text-cream-50">Corrected Text</h3>
               <CopyButton text={(assistant.result as GrammarResponse).corrected_text} />
             </div>
 
-            <div className="result-box">
+            <div className="result-box whitespace-pre-wrap">
               {(assistant.result as GrammarResponse).corrected_text}
             </div>
 
             {(assistant.result as GrammarResponse).changes_made && (assistant.result as GrammarResponse).changes_made!.length > 0 && (
-              <div>
+              <div className="min-w-0">
                 <h4 className="font-medium text-cream-100 mb-2">Changes Made</h4>
-                <ul className="list-disc list-inside space-y-1.5 text-sm text-cream-200">
+                <ul className="list-disc list-inside space-y-1.5 text-sm text-cream-200 break-words">
                   {(assistant.result as GrammarResponse).changes_made!.map((change, i) => (
-                    <li key={i}>{change}</li>
+                    <li key={i} className="break-words">{change}</li>
                   ))}
                 </ul>
               </div>

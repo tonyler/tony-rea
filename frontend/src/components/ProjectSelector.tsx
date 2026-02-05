@@ -24,6 +24,17 @@ export default function ProjectSelector({ value, onChange, allowNone = false }: 
     try {
       const { projects } = await projectsApi.list();
       setProjects(projects);
+
+      // Auto-select sphinx-protocol if no project is selected
+      if (!value && projects.length > 0) {
+        const sphinxProject = projects.find(p => p.id === 'sphinx-protocol');
+        if (sphinxProject) {
+          onChange(sphinxProject.id);
+        } else {
+          // Fallback to first project if sphinx-protocol doesn't exist
+          onChange(projects[0].id);
+        }
+      }
     } catch (error) {
       console.error('Failed to load projects:', error);
     } finally {

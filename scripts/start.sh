@@ -9,6 +9,23 @@ cd "$SCRIPT_DIR/.."
 echo "🚀 Starting Tony & Rea server..."
 echo ""
 
+# Resolve port early
+PORT_TO_USE=${PORT:-3001}
+
+# If something is already bound to the port, handle it gracefully
+EXISTING_PID=$(ss -ltnp "sport = :$PORT_TO_USE" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)
+if [ -n "$EXISTING_PID" ]; then
+    EXISTING_CMD=$(ps -p "$EXISTING_PID" -o cmd=)
+    if echo "$EXISTING_CMD" | grep -q "backend/dist/server.js"; then
+        echo "⚠️  Server already running on port $PORT_TO_USE (PID: $EXISTING_PID)"
+        echo "$EXISTING_PID" > tony-rea.pid
+        exit 0
+    else
+        echo "❌ Error: Port $PORT_TO_USE is already in use by another process (PID: $EXISTING_PID)"
+        exit 1
+    fi
+fi
+
 # Check if .env exists
 if [ ! -f .env ]; then
     echo "❌ Error: .env file not found"
@@ -16,11 +33,16 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check if OPENAI_API_KEY is set
+# Check required API keys
 source .env
-if [ -z "$OPENAI_API_KEY" ] || [ "$OPENAI_API_KEY" = "your_openai_api_key_here" ]; then
-    echo "❌ Error: OPENAI_API_KEY not configured in .env"
-    echo "   Please edit .env and add your OpenAI API key"
+if [ -z "$PERPLEXITY_API_KEY" ]; then
+    echo "❌ Error: PERPLEXITY_API_KEY not configured in .env"
+    echo "   Please edit .env and add your Perplexity API key"
+    exit 1
+fi
+if [ -z "$ANTHROPIC_API_KEY" ]; then
+    echo "❌ Error: ANTHROPIC_API_KEY not configured in .env"
+    echo "   Please edit .env and add your Anthropic API key"
     exit 1
 fi
 
@@ -46,7 +68,7 @@ if [ -z "$NODE_ENV" ]; then
 fi
 
 # Start server in background
-echo "▶️  Starting server on port ${PORT:-3000}..."
+echo "▶️  Starting server on port ${PORT_TO_USE}..."
 cd backend
 nohup node dist/server.js > ../logs/server.log 2>&1 &
 SERVER_PID=$!
@@ -61,17 +83,42 @@ sleep 2
 # Check if still running
 if ps -p $SERVER_PID > /dev/null 2>&1; then
     echo "✅ Server started successfully!"
-    echo ""
     echo "   PID: $SERVER_PID"
-    echo "   URL: http://localhost:${PORT:-3000}"
+    echo "   URL: http://localhost:${PORT:-3001}"
     echo "   Logs: ./logs/server.log"
-    echo ""
-    echo "Run ./scripts/stop.sh to stop the server"
-    echo "Run ./scripts/logs.sh to view logs"
-    echo ""
 else
     echo "❌ Error: Server failed to start"
     echo "   Check logs/server.log for details"
     rm tony-rea.pid
     exit 1
 fi
+
+# Start Discord bot in background
+echo ""
+echo "▶️  Starting Discord bot..."
+cd discord-bot
+nohup node dist/index.js > ../logs/discord-bot.log 2>&1 &
+BOT_PID=$!
+cd ..
+
+# Save bot PID
+echo $BOT_PID > discord-bot.pid
+
+# Wait a moment for bot to start
+sleep 2
+
+# Check if bot is still running
+if ps -p $BOT_PID > /dev/null 2>&1; then
+    echo "✅ Discord bot started successfully!"
+    echo "   PID: $BOT_PID"
+    echo "   Logs: ./logs/discord-bot.log"
+else
+    echo "⚠️  Discord bot failed to start"
+    echo "   Check logs/discord-bot.log for details"
+    rm -f discord-bot.pid
+fi
+
+echo ""
+echo "Run ./scripts/stop.sh to stop all services"
+echo "Run ./scripts/logs.sh to view logs"
+echo ""

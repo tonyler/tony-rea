@@ -91,6 +91,13 @@ export const ThreadResultSchema = z.object({
 
 export type ThreadResult = z.infer<typeof ThreadResultSchema>;
 
+// Tag Normalization Response (LLM fuzzy-matching)
+export const TagNormalizationSchema = z.object({
+  mappings: z.record(z.string(), z.string()),
+});
+
+export type TagNormalizationResponse = z.infer<typeof TagNormalizationSchema>;
+
 // Helper function to validate and parse LLM responses
 export function validateLLMResponse<T>(
   schema: z.ZodSchema<T>,

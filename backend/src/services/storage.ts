@@ -111,6 +111,7 @@ export async function getProject(projectId: string): Promise<ProjectMeta | null>
   }
 }
 
+
 // Helper function to slugify a title
 function slugifyTitle(title: string): string {
   return title
@@ -154,6 +155,11 @@ export async function createEntry(
   const meta = await getProject(projectId);
   if (!meta) {
     throw new Error('Project not found');
+  }
+
+  // Validate tags are present
+  if (!data.tags || data.tags.length === 0) {
+    throw new Error('Entry must have at least one tag');
   }
 
   // Generate slugified ID from title
@@ -214,6 +220,23 @@ export async function getEntry(projectId: string, entryId: string): Promise<Entr
   } catch (error) {
     return null;
   }
+}
+
+export async function updateEntry(
+  projectId: string,
+  entryId: string,
+  updates: Partial<FeedIngestResult>
+): Promise<Entry> {
+  const entryPath = path.join(PROJECTS_DIR, projectId, 'entries', `${entryId}.json`);
+
+  const entryContent = await fs.readFile(entryPath, 'utf-8');
+  const entry: Entry = JSON.parse(entryContent);
+
+  const updatedData = { ...entry.data, ...updates };
+  const updatedEntry: Entry = { ...entry, data: updatedData };
+
+  await fs.writeFile(entryPath, JSON.stringify(updatedEntry, null, 2));
+  return updatedEntry;
 }
 
 export async function deprecateEntry(
@@ -350,3 +373,90 @@ export async function listThreads(projectId: string): Promise<any[]> {
     return [];
   }
 }
+
+// Article operations (independent from projects)
+const ARTICLES_DIR = path.join(DATA_DIR, 'articles');
+
+export interface ArticleData {
+  id: string;
+  title: string;
+  content: string;
+  wordCount: number;
+  debate: {
+    r1: any;
+    r2: any | null;
+  };
+  budget: any;
+  exampleArticles: any[];
+  createdAt: string;
+}
+
+export interface ArticleSummary {
+  id: string;
+  title: string;
+  wordCount: number;
+  overallScore: number;
+  budgetUsed: number;
+  createdAt: string;
+}
+
+export async function initializeArticleStorage(): Promise<void> {
+  await fs.mkdir(ARTICLES_DIR, { recursive: true });
+}
+
+export async function saveArticle(article: ArticleData): Promise<string> {
+  await fs.mkdir(ARTICLES_DIR, { recursive: true });
+
+  await fs.writeFile(
+    path.join(ARTICLES_DIR, `${article.id}.json`),
+    JSON.stringify(article, null, 2)
+  );
+
+  return article.id;
+}
+
+export async function loadArticle(articleId: string): Promise<ArticleData | null> {
+  try {
+    const articlePath = path.join(ARTICLES_DIR, `${articleId}.json`);
+    const content = await fs.readFile(articlePath, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+export async function listArticles(): Promise<ArticleSummary[]> {
+  try {
+    const files = await fs.readdir(ARTICLES_DIR);
+    const articles: ArticleSummary[] = [];
+
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+
+      try {
+        const articlePath = path.join(ARTICLES_DIR, file);
+        const content = await fs.readFile(articlePath, 'utf-8');
+        const article = JSON.parse(content) as ArticleData;
+
+        const lastRound = article.debate.r2 || article.debate.r1;
+        const overallScore = lastRound?.avg_scores?.overall || 0;
+
+        articles.push({
+          id: article.id,
+          title: article.title,
+          wordCount: article.wordCount,
+          overallScore,
+          budgetUsed: article.budget?.total || 0,
+          createdAt: article.createdAt,
+        });
+      } catch (error) {
+        console.warn(`Skipping invalid article file: ${file}`);
+      }
+    }
+
+    return articles.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch {
+    return [];
+  }
+}
+

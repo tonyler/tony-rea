@@ -1,7 +1,7 @@
 import Header from './Header';
 import TabNav from './TabNav';
 
-type TabType = 'assistant' | 'feed' | 'threads';
+type TabType = 'assistant' | 'feed' | 'articles' | 'history' | 'voice';
 
 interface AppLayoutProps {
   activeTab: TabType;
@@ -27,7 +27,7 @@ export default function AppLayout({ activeTab, onTabChange, children }: AppLayou
         <Header />
         <TabNav activeTab={activeTab} onTabChange={onTabChange} />
 
-        <main className="max-w-5xl mx-auto px-6 lg:px-8 py-10">
+        <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 pb-20 sm:pb-10">
           <div className="animate-slide-up">
             {children}
           </div>

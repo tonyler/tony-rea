@@ -1,4 +1,8 @@
+import { useAuth } from '../../contexts/AuthContext';
+
 export default function Header() {
+  const { user, logout } = useAuth();
+
   return (
     <header className="relative border-b border-smoke-400/20">
       {/* Subtle gradient line at top */}
@@ -28,10 +32,32 @@ export default function Header() {
             </div>
           </div>
 
-          {/* Status indicator */}
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-jade-400 animate-pulse-slow" />
-            <span className="text-xs text-smoke-100 tracking-wide">Active</span>
+          {/* User info and logout */}
+          <div className="flex items-center gap-4">
+            {user && (
+              <>
+                <div className="flex items-center gap-2">
+                  {user.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt={user.username}
+                      className="w-7 h-7 rounded-full"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-smoke-400/40 flex items-center justify-center">
+                      <span className="text-xs text-cream-50">{user.username[0].toUpperCase()}</span>
+                    </div>
+                  )}
+                  <span className="text-sm text-smoke-100">{user.username}</span>
+                </div>
+                <button
+                  onClick={logout}
+                  className="text-xs text-smoke-200 hover:text-cream-50 transition-colors"
+                >
+                  Logout
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

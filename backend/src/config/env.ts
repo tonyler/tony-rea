@@ -6,11 +6,21 @@ import * as path from 'path';
 dotenv.config({ path: path.join(__dirname, '../../../.env') });
 
 const envSchema = z.object({
-  OPENAI_API_KEY: z.string().min(1, 'OpenAI API key required'),
-  OPENAI_MODEL: z.string().default('gpt-4o-mini'),
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(['development', 'production']).default('development'),
   DATA_DIR: z.string().default('./data'),
+  // Discord OAuth
+  DISCORD_CLIENT_ID: z.string().min(1, 'Discord Client ID required'),
+  DISCORD_CLIENT_SECRET: z.string().min(1, 'Discord Client Secret required'),
+  DISCORD_REDIRECT_URI: z.string().default('http://localhost:3001/api/auth/callback'),
+  // Multi-LLM providers for Articles feature
+  PERPLEXITY_API_KEY: z.string().min(1, 'Perplexity API key required'),
+  ANTHROPIC_API_KEY: z.string().min(1, 'Anthropic API key required'),
+  XAI_API_KEY: z.string().optional(),  // Only needed for X search
+  OPENAI_API_KEY: z.string().optional(),  // Fallback only
+  GOOGLE_API_KEY: z.string().optional(),  // Fallback only
+  // Article generation config (hard cap at $0.20)
+  MAX_ARTICLE_BUDGET: z.coerce.number().max(0.20, 'Budget cannot exceed $0.20').default(0.10),
 });
 
 export type Env = z.infer<typeof envSchema>;

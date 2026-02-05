@@ -4,6 +4,7 @@ import Button from '../components/Button';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ProjectSelector from '../components/ProjectSelector';
 import Card from '../components/Card';
+import { TagInput } from '../components/TagInput';
 import type { Entry } from '../features/feed/types';
 
 export default function Feed() {
@@ -55,6 +56,18 @@ export default function Feed() {
             </Button>
             <Button variant={feed.view === 'kb' ? 'primary' : 'secondary'} onClick={() => feed.setView('kb')}>
               KB
+            </Button>
+            <Button
+              variant={feed.view === 'tags' ? 'primary' : 'secondary'}
+              onClick={() => feed.setView('tags')}
+              className="relative"
+            >
+              Tags
+              {feed.pendingTags.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-coral-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  {feed.pendingTags.length}
+                </span>
+              )}
             </Button>
           </div>
         )}
@@ -108,6 +121,19 @@ export default function Feed() {
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-smoke-50 mb-2 tracking-wide">
+                Tags (optional - include platform names like Medium, TaskOn, X, etc.)
+              </label>
+              <TagInput
+                availableTags={feed.allTags}
+                selectedTags={feed.selectedTags}
+                onChange={feed.setSelectedTags}
+                disabled={feed.ingesting}
+                placeholder="Search or add tags (e.g., Medium, TaskOn, Galxe...)"
+              />
+            </div>
+
             <Button type="submit" disabled={feed.ingesting || !feed.content.trim()}>
               {feed.ingesting ? 'Ingesting...' : 'Ingest'}
             </Button>
@@ -132,8 +158,29 @@ export default function Feed() {
                       <p className="text-sm text-cream-200">
                         <span className="font-mono text-jade-300">{entry.id}</span>: {entry.data.title}
                       </p>
+                      {entry.data.tags && entry.data.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {entry.data.tags.map((tag) => (
+                            <span key={tag} className="px-1.5 py-0.5 bg-amber-400/10 text-amber-300 text-xs rounded">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
+                  {feed.ingestResult.suggestedNewTags && feed.ingestResult.suggestedNewTags.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-jade-500/20">
+                      <p className="text-xs text-smoke-100 mb-1.5">Suggested new tags (pending review):</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {feed.ingestResult.suggestedNewTags.map((tag: string) => (
+                          <span key={tag} className="px-2 py-0.5 bg-honey-400/10 text-honey-300 text-xs rounded-md border border-honey-400/20">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -376,6 +423,67 @@ export default function Feed() {
                             </div>
                           </div>
 
+                          {/* Tags */}
+                          <div className="mt-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <h5 className="text-xs font-medium text-smoke-50 uppercase tracking-wider">Tags</h5>
+                              {feed.editingTagsEntryId !== entry.id && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    feed.startEditingTags(entry);
+                                  }}
+                                  className="text-xs text-amber-300 hover:text-amber-200 transition-colors"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </div>
+                            {feed.editingTagsEntryId === entry.id ? (
+                              <div className="space-y-2">
+                                <TagInput
+                                  availableTags={feed.allTags}
+                                  selectedTags={feed.editingTags}
+                                  onChange={feed.setEditingTags}
+                                  placeholder="Search or add tags..."
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      feed.handleUpdateTags(entry.id, feed.editingTags);
+                                    }}
+                                    className="px-3 py-1 text-xs bg-jade-500/20 text-jade-400 hover:bg-jade-500/30 rounded-md transition-colors"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      feed.cancelEditingTags();
+                                    }}
+                                    className="px-3 py-1 text-xs bg-smoke-400/20 text-smoke-100 hover:bg-smoke-400/30 rounded-md transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : entry.data.tags && entry.data.tags.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {entry.data.tags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="px-2 py-0.5 bg-amber-400/10 text-amber-300 text-xs rounded-md border border-amber-400/20"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-smoke-200">No tags</p>
+                            )}
+                          </div>
+
                           {/* Sources */}
                           {entry.data.sources && entry.data.sources.length > 0 && (
                             <div className="mt-4">
@@ -524,6 +632,118 @@ export default function Feed() {
           <p className="text-xs text-smoke-300 mt-3">
             The LLM uses this index to select which entries to read when answering questions.
           </p>
+        </Card>
+      )}
+
+      {/* Tags View */}
+      {feed.view === 'tags' && (
+        <Card>
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <div className="w-6 h-6 rounded bg-amber-400/20 flex items-center justify-center">
+                <svg className="w-3.5 h-3.5 text-amber-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-display font-semibold text-cream-50">Tag Management</h3>
+            </div>
+            <Button variant="secondary" onClick={feed.loadTags} disabled={feed.loadingTags}>
+              {feed.loadingTags ? 'Loading...' : 'Refresh'}
+            </Button>
+          </div>
+
+          {feed.loadingTags ? (
+            <LoadingSpinner message="Loading tags..." />
+          ) : (
+            <div className="space-y-6">
+              {/* Pending Tags Section */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium text-cream-100">
+                    Pending Tags ({feed.pendingTags.length})
+                  </h4>
+                  {feed.pendingTags.length > 0 && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={feed.handleAcceptAllTags}
+                        className="text-sm text-jade-400 hover:text-jade-300 transition-colors"
+                      >
+                        Accept All
+                      </button>
+                      <span className="text-smoke-300">|</span>
+                      <button
+                        type="button"
+                        onClick={feed.handleRejectAllTags}
+                        className="text-sm text-coral-400 hover:text-coral-300 transition-colors"
+                      >
+                        Reject All
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {feed.pendingTags.length === 0 ? (
+                  <p className="text-smoke-200 text-sm py-4 text-center">No pending tags to review.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {feed.pendingTags.map((pending) => (
+                      <div
+                        key={pending.tag}
+                        className="flex items-center justify-between p-3 bg-void-400/30 border border-smoke-400/30 rounded-lg"
+                      >
+                        <div className="flex-1">
+                          <span className="text-cream-100 font-medium">{pending.tag}</span>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-smoke-200">
+                            <span>Source: {pending.source === 'llm' ? 'LLM suggested' : 'User proposed'}</span>
+                            <span>Proposed {pending.count}x</span>
+                            <span>{new Date(pending.proposedAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => feed.handleAcceptTag(pending.tag)}
+                            className="px-3 py-1.5 text-sm bg-jade-500/20 text-jade-400 hover:bg-jade-500/30 rounded-md transition-colors"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => feed.handleRejectTag(pending.tag)}
+                            className="px-3 py-1.5 text-sm bg-coral-500/20 text-coral-400 hover:bg-coral-500/30 rounded-md transition-colors"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* All Tags Section */}
+              <div>
+                <h4 className="font-medium text-cream-100 mb-3">
+                  All Active Tags ({feed.allTags.length})
+                </h4>
+                <div className="flex flex-wrap gap-2 p-4 bg-void-400/30 border border-smoke-400/30 rounded-lg max-h-60 overflow-y-auto">
+                  {feed.allTags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="px-2 py-1 bg-amber-400/10 text-amber-300 text-sm rounded-md"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-xs text-smoke-300 mt-2">
+                  These tags are available for use when ingesting content. The LLM will use these to categorize entries.
+                </p>
+              </div>
+            </div>
+          )}
         </Card>
       )}
 

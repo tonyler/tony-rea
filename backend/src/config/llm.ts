@@ -1,5 +1,3 @@
-import { env } from './env';
-
 /**
  * LLM Configuration
  *
@@ -10,7 +8,7 @@ import { env } from './env';
  * - 0.7: More creative variation (thread generation)
  */
 export const llmConfig = {
-  defaultModel: env.OPENAI_MODEL,
+  defaultModel: 'gpt-4o-mini',  // OpenAI direct (used by feed/assistant features)
 
   temperatures: {
     mod: 0.5,         // Consistent but natural responses

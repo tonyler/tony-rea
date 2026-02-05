@@ -310,12 +310,49 @@
     @apply bg-void-400/60 p-5 rounded-lg;
     @apply border-l-2 border-amber-400/60;
     @apply text-cream-100 leading-relaxed;
+    @apply overflow-x-auto break-words;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    max-width: 100%;
+  }
+
+  /* Mobile-specific fixes for cards and content */
+  @media (max-width: 640px) {
+    .card {
+      @apply p-4;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    .result-box {
+      @apply p-3;
+      font-size: 14px;
+    }
+
+    .textarea {
+      @apply min-h-[100px];
+    }
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Hide scrollbar but allow scroll */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Safe area padding for iOS devices with notch/home indicator */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
   /* Gradient text */

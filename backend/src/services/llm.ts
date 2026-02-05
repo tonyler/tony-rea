@@ -53,6 +53,7 @@ export async function callLLM<T>(
           { role: 'user', content: userPrompt },
         ],
         temperature: finalTemperature,
+        response_format: { type: 'json_object' },
         ...(maxTokens && { max_tokens: maxTokens }),
       });
 
@@ -70,13 +71,10 @@ export async function callLLM<T>(
         return { success: true, data: validation.data };
       }
 
+      // Don't retry on validation failures — the LLM returned a response,
+      // retrying with the same prompt won't fix bad JSON structure
       lastError = validation.error;
-
-      // Don't retry on the last attempt
-      if (attempt < maxRetries) {
-        console.log(`LLM validation failed (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`);
-        console.log('Retrying...');
-      }
+      return { success: false, error: lastError };
     } catch (error) {
       if (error instanceof Error) {
         lastError = `LLM API error: ${error.message}`;
@@ -84,10 +82,9 @@ export async function callLLM<T>(
         lastError = 'Unknown LLM error';
       }
 
-      // Don't retry on the last attempt
+      // Only retry on API errors (rate limits, timeouts, network issues)
       if (attempt < maxRetries) {
         console.log(`LLM call failed (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`);
-        console.log('Retrying...');
       }
     }
   }
@@ -98,13 +95,13 @@ export async function callLLM<T>(
 export async function callLLMRaw(
   userPrompt: string,
   systemPrompt: string,
-  options?: { model?: string; temperature?: number; mode?: LLMMode }
+  options?: { model?: string; temperature?: number; mode?: LLMMode; maxTokens?: number }
 ): Promise<string> {
   if (!openai) {
     throw new Error('LLM service not initialized');
   }
 
-  const { model, temperature, mode } = options ?? {};
+  const { model, temperature, mode, maxTokens } = options ?? {};
   const finalTemperature = temperature ?? (mode ? llmConfig.temperatures[mode] : 0.7);
 
   const response = await openai.chat.completions.create({
@@ -114,6 +111,7 @@ export async function callLLMRaw(
       { role: 'user', content: userPrompt },
     ],
     temperature: finalTemperature,
+    ...(maxTokens && { max_tokens: maxTokens }),
   });
 
   return response.choices[0]?.message?.content || '';

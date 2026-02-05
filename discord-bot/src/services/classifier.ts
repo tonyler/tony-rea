@@ -42,12 +42,14 @@ export async function classifyMessage(
       return null;
     }
 
+    const data = result.data as ClassificationResult;
+
     logger.debug('Classification complete', {
-      isKnowledge: result.data.isKnowledge,
-      confidence: result.data.confidence,
+      isKnowledge: data.isKnowledge,
+      confidence: data.confidence,
     });
 
-    return result.data;
+    return data;
   } catch (error) {
     logger.error('Classification error', {
       error: error instanceof Error ? error.message : 'Unknown error',

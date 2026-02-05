@@ -27,8 +27,24 @@ ${predefinedTags}
 
 TAG RULES:
 - Use 1-5 tags per entry from the predefined list above
-- If content relates to Twitter/X (Spaces, tweets, raids, etc.), include "Twitter" tag
+- ALWAYS include the SOURCE PLATFORM as a tag when identifiable:
+  * Twitter/X content (tweets, threads, raids) → "Twitter" or "X"
+  * Medium articles → "Medium"
+  * TaskOn quests/campaigns → "TaskOn"
+  * Galxe campaigns → "Galxe"
+  * Discord announcements → "Discord"
+  * Telegram posts → "Telegram"
+  * Spotify podcasts → "Spotify"
+  * YouTube videos → "YouTube"
+  * Reddit posts → "Reddit"
+  * Mirror articles → "Mirror"
+  * Substack posts → "Substack"
+  * LinkedIn posts → "LinkedIn"
+  * Farcaster casts → "Farcaster"
+  * Lens posts → "Lens"
+  * Zealy quests → "Zealy"
 - If content relates to Spaces/AMA, include both "Spaces" and "AMA" tags
+- If user provided specific tags, ALWAYS include them
 - If you need a tag NOT in the list, add it to "suggested_new_tags" for review
 
 OUTPUT JSON:

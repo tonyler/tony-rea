@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { Entry } from '../types';
-import { feedApi, type MCPResource, type MCPIngestResult } from '../../../services/api';
+import { feedApi, tagsApi, type MCPResource, type MCPIngestResult, type PendingTag } from '../../../services/api';
 
-export type FeedView = 'ingest' | 'entries' | 'kb' | 'mcp';
+export type FeedView = 'ingest' | 'entries' | 'kb' | 'mcp' | 'tags';
 
 export function useFeed() {
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -11,8 +11,14 @@ export function useFeed() {
   // Ingest state
   const [content, setContent] = useState('');
   const [sources, setSources] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [ingesting, setIngesting] = useState(false);
   const [ingestResult, setIngestResult] = useState<any>(null);
+
+  // Tags state
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [pendingTags, setPendingTags] = useState<PendingTag[]>([]);
+  const [loadingTags, setLoadingTags] = useState(false);
 
   // Entries state
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -26,6 +32,10 @@ export function useFeed() {
   // Update state
   const [updateInstruction, setUpdateInstruction] = useState('');
   const [updating, setUpdating] = useState(false);
+
+  // Tag editing state
+  const [editingTagsEntryId, setEditingTagsEntryId] = useState<string | null>(null);
+  const [editingTags, setEditingTags] = useState<string[]>([]);
 
   // MCP state
   const [mcpUrl, setMcpUrl] = useState('');
@@ -70,6 +80,75 @@ export function useFeed() {
     }
   };
 
+  const loadTags = async () => {
+    setLoadingTags(true);
+    setError(null);
+    try {
+      const [allResult, pendingResult] = await Promise.all([
+        tagsApi.getAll(),
+        tagsApi.getPending(),
+      ]);
+      setAllTags(allResult.tags);
+      setPendingTags(pendingResult.tags);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load tags');
+    } finally {
+      setLoadingTags(false);
+    }
+  };
+
+  const handleAcceptTag = async (tag: string) => {
+    try {
+      await tagsApi.accept(tag);
+      await loadTags();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to accept tag');
+    }
+  };
+
+  const handleRejectTag = async (tag: string) => {
+    try {
+      await tagsApi.reject(tag);
+      await loadTags();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject tag');
+    }
+  };
+
+  const handleAcceptAllTags = async () => {
+    try {
+      await tagsApi.acceptAll();
+      await loadTags();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to accept all tags');
+    }
+  };
+
+  const handleRejectAllTags = async () => {
+    try {
+      await tagsApi.rejectAll();
+      await loadTags();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject all tags');
+    }
+  };
+
+  const handleAddTag = async (tag: string) => {
+    try {
+      await tagsApi.add(tag);
+      await loadTags();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add tag');
+    }
+  };
+
+  // Load tags on mount and when switching to ingest/tags view
+  useEffect(() => {
+    if (view === 'ingest' || view === 'tags') {
+      loadTags();
+    }
+  }, [view]);
+
   useEffect(() => {
     if (projectId) {
       if (view === 'entries') {
@@ -95,10 +174,19 @@ export function useFeed() {
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 
-      const result = await feedApi.ingest(projectId, content, sourceList.length > 0 ? sourceList : undefined);
+      const result = await feedApi.ingest(
+        projectId,
+        content,
+        sourceList.length > 0 ? sourceList : undefined,
+        selectedTags.length > 0 ? selectedTags : undefined
+      );
       setIngestResult(result);
       setContent('');
       setSources('');
+      setSelectedTags([]);
+
+      // Reload tags to get any new pending tags
+      await loadTags();
 
       // Reload entries if viewing them
       if (view === 'entries') {
@@ -146,6 +234,28 @@ export function useFeed() {
       loadEntries();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed');
+    }
+  };
+
+  const startEditingTags = (entry: Entry) => {
+    setEditingTagsEntryId(entry.id);
+    setEditingTags(entry.data.tags || []);
+  };
+
+  const cancelEditingTags = () => {
+    setEditingTagsEntryId(null);
+    setEditingTags([]);
+  };
+
+  const handleUpdateTags = async (entryId: string, tags: string[]) => {
+    if (!projectId) return;
+    try {
+      await feedApi.updateTags(projectId, entryId, tags);
+      setEditingTagsEntryId(null);
+      setEditingTags([]);
+      loadEntries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update tags');
     }
   };
 
@@ -215,6 +325,8 @@ export function useFeed() {
     setContent,
     sources,
     setSources,
+    selectedTags,
+    setSelectedTags,
     ingesting,
     ingestResult,
     entries,
@@ -232,6 +344,23 @@ export function useFeed() {
     handleDelete,
     loadEntries,
     loadKb,
+    // Tag editing
+    editingTagsEntryId,
+    editingTags,
+    setEditingTags,
+    startEditingTags,
+    cancelEditingTags,
+    handleUpdateTags,
+    // Tags
+    allTags,
+    pendingTags,
+    loadingTags,
+    loadTags,
+    handleAcceptTag,
+    handleRejectTag,
+    handleAcceptAllTags,
+    handleRejectAllTags,
+    handleAddTag,
     // MCP
     mcpUrl,
     setMcpUrl,
