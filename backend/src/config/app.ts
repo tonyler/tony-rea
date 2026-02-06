@@ -6,4 +6,5 @@ export const appConfig = {
   isDevelopment: env.NODE_ENV === 'development',
   isProduction: env.NODE_ENV === 'production',
   dataDir: env.DATA_DIR,
+  host: env.HOST,
 } as const;

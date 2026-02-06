@@ -9,6 +9,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(['development', 'production']).default('development'),
   DATA_DIR: z.string().default('./data'),
+  HOST: z.string().default('127.0.0.1'),
   // Discord OAuth
   DISCORD_CLIENT_ID: z.string().min(1, 'Discord Client ID required'),
   DISCORD_CLIENT_SECRET: z.string().min(1, 'Discord Client Secret required'),

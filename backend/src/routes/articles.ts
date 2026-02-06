@@ -10,6 +10,7 @@ import {
   createBudgetTracker,
   recordCall,
   canAffordCall,
+  estimateMaxCallCost,
   BudgetTracker,
   ModelId,
   getAvailableModels,
@@ -77,6 +78,25 @@ const ReviseRequestSchema = z.object({
   preserveDebate: z.boolean().default(false),
 });
 
+function buildRetrievalQuery(content?: string, request?: ArticleRequest): string {
+  const fragments: string[] = [];
+
+  if (request) {
+    if (request.topic) fragments.push(`Topic: ${request.topic}`);
+    if (request.points && request.points.length > 0) {
+      fragments.push(`Key points: ${request.points.join('; ')}`);
+    }
+    if (request.draft) fragments.push(`Draft: ${request.draft}`);
+    if (request.styleNotes) fragments.push(`Style notes: ${request.styleNotes}`);
+  }
+
+  if (fragments.length === 0 && content) {
+    fragments.push(content);
+  }
+
+  return fragments.join('\n');
+}
+
 const SaveRequestSchema = ArticleResultSchema;
 
 router.get('/models', (_req: Request, res: Response) => {
@@ -125,11 +145,13 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
 
     // Step 1.5: Retrieve relevant KB entries if projectId is provided
     const topicText = content || articleRequest?.topic || '';
+    const retrievalQuery = buildRetrievalQuery(content, articleRequest);
+    const kbQuery = retrievalQuery || topicText;
     let kbKnowledge = '';
 
     if (projectId) {
       console.log(`[articles] Step 1.5: Retrieving KB entries for project=${projectId}...`);
-      const retrieval = await retrieveRelevantEntries(projectId, topicText);
+      const retrieval = await retrieveRelevantEntries(projectId, kbQuery);
 
       if (retrieval.entries.length > 0) {
         kbKnowledge = formatRetrievedKnowledge(retrieval.entries);
@@ -173,17 +195,29 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
     if (!v1Result.success || !v1Result.data) {
       const isJsonParseError = v1Result.error?.includes('JSON parse error');
       if (isJsonParseError) {
-        console.warn(`[articles] ${draftModel} JSON parse failed. Retrying with GPT-5-mini...`);
         const strictJsonSystem = `${claudeV1Prompt.system}\n\nReturn ONLY valid JSON. Do not include tool calls, browsing steps, or <search> tags.`;
-        const gptRetry = await callMultiLLM('gpt-5-mini', {
+        console.warn(`[articles] ${draftModel} JSON parse failed. Retrying with ${draftModel} (strict JSON)...`);
+        const sameModelRetry = await callMultiLLM(draftModel, {
           systemPrompt: strictJsonSystem,
           userPrompt: claudeV1Prompt.user,
-          temperature: 1,
+          temperature: 0.2,
           maxTokens: 8192,
         }, ArticleContentSchema);
-        v1Result = gptRetry;
+        v1Result = sameModelRetry;
         if (v1Result.success) {
-          budget = recordCall(budget, 'gpt-5-mini', v1Result.tokens, v1Result.cost);
+          budget = recordCall(budget, draftModel, v1Result.tokens, v1Result.cost);
+        } else {
+          console.warn(`[articles] ${draftModel} strict JSON retry failed. Retrying with GPT-5-mini...`);
+          const gptRetry = await callMultiLLM('gpt-5-mini', {
+            systemPrompt: strictJsonSystem,
+            userPrompt: claudeV1Prompt.user,
+            temperature: 0.2,
+            maxTokens: 8192,
+          }, ArticleContentSchema);
+          v1Result = gptRetry;
+          if (v1Result.success) {
+            budget = recordCall(budget, 'gpt-5-mini', v1Result.tokens, v1Result.cost);
+          }
         }
       }
     }
@@ -204,6 +238,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
     // Step 3: Run council evaluation (quality/ethics only - no voice examples)
     let councilResult: Awaited<ReturnType<typeof runCouncil>> | null = null;
     let flaggedPhrases: FlaggedPhraseWithJudge[] = [];
+    let earlyStop = false;
 
     if (councilMode === 'skip') {
       console.log('[articles] Step 3: Council skipped (councilMode=skip)');
@@ -212,31 +247,34 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
 
       // Build judge configs from request or use defaults
       let judgeConfigs;
+      let judgeConfigWarnings: string[] = [];
       if (judgesInput && judgesInput.length > 0) {
         const built = buildJudgeConfigs(judgesInput, searchMode);
         judgeConfigs = built.configs;
+        judgeConfigWarnings = built.warnings;
         warnings.push(...built.warnings);
       } else {
         judgeConfigs = getDefaultJudges(searchMode as SearchMode);
       }
 
       councilResult = await runCouncil(initialArticle.content, budget, {
-        kbKnowledge,
+        projectId,
         judges: judgeConfigs,
         searchMode: searchMode as SearchMode,
+        judgeConfigWarnings,
       });
       budget = councilResult.budget;
       warnings.push(...councilResult.warnings);
       flaggedPhrases = councilResult.allFlaggedPhrases || [];
+      earlyStop = councilResult.skipFinalRevision;
     }
 
     // Step 4: Auto-revise if council found issues (not early stop or skip final)
     let finalArticle = initialArticle;
-    const estimatedRevisionCost = 0.04;
 
     const skipRevision = !councilResult || councilResult.skipFinalRevision;
 
-    if (!skipRevision && canAffordCall(budget, estimatedRevisionCost)) {
+    if (!skipRevision) {
       const roundToUse = councilResult!.r2 || councilResult!.r1;
 
       const finalPrompt = getClaudeFinalPrompt(
@@ -246,22 +284,30 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
         flaggedPhrases
       );
 
-      console.log(`[articles] Step 4: Running final revision with ${revisionModel} (budget remaining: $${budget.remaining.toFixed(4)})`);
-      const finalResult = await callMultiLLM(revisionModel, {
-        systemPrompt: finalPrompt.system,
-        userPrompt: finalPrompt.user,
-        temperature: 0.5,
-        maxTokens: 8192,
-      }, ArticleContentSchema);
+      const estimatedRevisionCost = estimateMaxCallCost(
+        revisionModel,
+        finalPrompt.system.length + finalPrompt.user.length,
+        8192
+      );
 
-      if (finalResult.success && finalResult.data) {
-        budget = recordCall(budget, revisionModel, finalResult.tokens, finalResult.cost);
-        finalArticle = finalResult.data;
+      if (!canAffordCall(budget, estimatedRevisionCost)) {
+        console.log(`[articles] Step 4: Skipping final revision (budget remaining: $${budget.remaining.toFixed(4)}, est=$${estimatedRevisionCost.toFixed(4)})`);
+      } else {
+        console.log(`[articles] Step 4: Running final revision with ${revisionModel} (budget remaining: $${budget.remaining.toFixed(4)}, est=$${estimatedRevisionCost.toFixed(4)})`);
+        const finalResult = await callMultiLLM(revisionModel, {
+          systemPrompt: finalPrompt.system,
+          userPrompt: finalPrompt.user,
+          temperature: 0.5,
+          maxTokens: 8192,
+        }, ArticleContentSchema);
+
+        if (finalResult.success && finalResult.data) {
+          budget = recordCall(budget, revisionModel, finalResult.tokens, finalResult.cost);
+          finalArticle = finalResult.data;
+        }
       }
-    } else if (skipRevision) {
-      console.log('[articles] Step 4: Skipping final revision (council approved or skipped)');
     } else {
-      console.log(`[articles] Step 4: Skipping final revision (budget remaining: $${budget.remaining.toFixed(4)})`);
+      console.log('[articles] Step 4: Skipping final revision (council approved or skipped)');
     }
 
     // Build response
@@ -283,6 +329,8 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       title: finalArticle.title,
       content: finalArticle.content,
       wordCount: finalArticle.content.split(/\s+/).length,
+      earlyStop,
+      projectId,
       debate: {
         r1: councilResult ? councilResult.r1 : emptyRound,
         r2: councilResult ? councilResult.r2 : null,
@@ -406,13 +454,22 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
 
       budget = recordCall(budget, 'claude-sonnet-4-5', claudeResult.tokens, claudeResult.cost);
 
-      const councilResult = await runCouncil(claudeResult.data.content, budget);
+      const councilResult = await runCouncil(claudeResult.data.content, budget, {
+        projectId: existingArticle.projectId,
+      });
       budget = councilResult.budget;
+      const flaggedPhrases = councilResult.allFlaggedPhrases || [];
+      const earlyStop = councilResult.skipFinalRevision;
 
       let finalArticle = claudeResult.data;
 
       if (councilResult.r2 && !councilResult.earlyStop) {
-        const finalPrompt = getClaudeFinalPrompt(claudeResult.data.content, councilResult.r2, exampleArticles);
+        const finalPrompt = getClaudeFinalPrompt(
+          claudeResult.data.content,
+          councilResult.r2,
+          exampleArticles,
+          flaggedPhrases
+        );
 
         const finalResult = await callMultiLLM('claude-sonnet-4-5', {
           systemPrompt: finalPrompt.system,
@@ -434,6 +491,8 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
         title: finalArticle.title,
         content: finalArticle.content,
         wordCount: finalArticle.content.split(/\s+/).length,
+        earlyStop,
+        projectId: existingArticle.projectId,
         debate: {
           r1: councilResult.r1,
           r2: councilResult.r2,

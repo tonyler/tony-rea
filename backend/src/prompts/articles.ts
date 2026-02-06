@@ -214,18 +214,24 @@ export function getJudgeR1Prompt(
   role: JudgeRole,
   label: string,
   article: string,
-  kbKnowledge?: string
+  kbKnowledge?: string,
+  options?: { useWebSearch?: boolean }
 ): { system: string; user: string } {
   const currentDate = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const useWebSearch = options?.useWebSearch ?? false;
+  const webSearchLine = useWebSearch
+    ? `2. VERIFY EACH ONE using web search - search for current data as of ${currentDate}`
+    : '2. VERIFY EACH ONE against KB facts only (NO web search available)';
 
   const rolePersonalities: Record<JudgeRole, string> = {
     'fact-checker': `You are a THOROUGH FACT CHECKER. Today is ${currentDate}. Your job is to:
 
 1. EXTRACT every single number, statistic, price, date, and factual claim from the article
-2. VERIFY EACH ONE using web search - search for current data as of ${currentDate}
+${webSearchLine}
 3. For EACH fact, report: what the article claims vs what you found
 4. Flag ANY discrepancy - wrong prices, outdated stats, incorrect dates, false claims
 5. Check clarity and structure too, but FACT-CHECKING IS YOUR PRIMARY JOB
+6. If a claim is found in KB, treat it as ground truth and DO NOT web-check it
 
 Be exhaustive. Check EVERY number. Don't skip any. Cost is not a concern.`,
     'originality-reviewer': 'You focus on originality, creative expression, emotional authenticity. Penalize generic or templated writing heavily. Also check for REPETITION - same ideas rephrased, same phrases used multiple times.',
@@ -333,11 +339,12 @@ If repetition_density < 5, verdict MUST be REVISE or REJECT.
 
 # FACTUAL ACCURACY CHECK (CRITICAL)
 
-**VERIFY SPECIFIC NUMBERS BY SEARCHING THE INTERNET:**
+${useWebSearch ? `**VERIFY SPECIFIC NUMBERS BY SEARCHING THE INTERNET:**
 - Token prices - search for current prices and compare
 - TVL figures, market caps, trading volumes - verify against live sources
 - Specific dates - confirm with reliable sources
-- Statistics - check if they match current data
+- Statistics - check if they match current data`
+  : '**VERIFY SPECIFIC NUMBERS USING KB FACTS ONLY (NO WEB SEARCH).**'}
 
 **Scoring guidelines for source_credibility:**
 - 9-10: Numbers are current, verified, and include timestamps (e.g., "as of Feb 2024")
@@ -452,11 +459,9 @@ Return JSON:
 
 STRICT Verification Rules:
 - Extract ALL numbers, prices, dates, percentages, statistics as separate claims
-- Check KB FIRST for each claim (source_type: "kb", source_id: entry title)
-- If not in KB, use web search (source_type: "web", source_url: URL)
-- If cannot verify at all (source_type: "unverified")
-- ANY mismatch → verdict MUST be REVISE or REJECT
-- If unverified > 20% of claims → source_credibility <= 5
+${useWebSearch
+  ? `- Check KB FIRST for each claim (source_type: "kb", source_id: entry title)\n- If claim is found in KB, DO NOT web-check it\n- If not in KB, use web search (source_type: "web", source_url: URL)\n- If cannot verify at all (source_type: "unverified")\n- ANY mismatch → verdict MUST be REVISE or REJECT\n- If unverified > 20% of claims → source_credibility <= 5`
+  : `- Check KB FIRST for each claim (source_type: "kb", source_id: entry title)\n- If not in KB, mark as unverified (source_type: "unverified")\n- ANY mismatch with KB → verdict MUST be REVISE or REJECT\n- Do NOT auto-penalize source_credibility solely for unverified count when web search is unavailable` }
 
 STRICT Scoring Rules:
 - If 3+ AI slop patterns found: ai_slop <= 5, verdict = REVISE or REJECT

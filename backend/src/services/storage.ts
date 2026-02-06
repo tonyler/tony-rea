@@ -382,12 +382,16 @@ export interface ArticleData {
   title: string;
   content: string;
   wordCount: number;
+  earlyStop?: boolean;
+  projectId?: string;
   debate: {
     r1: any;
     r2: any | null;
   };
   budget: any;
   exampleArticles: any[];
+  initialDraft?: { title: string; content: string };
+  warnings?: string[];
   createdAt: string;
 }
 
@@ -459,4 +463,3 @@ export async function listArticles(): Promise<ArticleSummary[]> {
     return [];
   }
 }
-

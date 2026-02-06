@@ -513,7 +513,7 @@ function ArticleDetailView({ article, onBack }: ArticleDetailViewProps) {
             r1={article.debate.r1}
             r2={article.debate.r2}
             budget={article.budget}
-            earlyStop={!article.debate.r2}
+            earlyStop={!!article.earlyStop}
           />
         </Card>
       )}

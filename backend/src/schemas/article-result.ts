@@ -157,6 +157,8 @@ export const ArticleResultSchema = z.object({
   title: z.string(),
   content: z.string(),
   wordCount: z.number(),
+  earlyStop: z.boolean().optional(),
+  projectId: z.string().optional(),
   debate: z.object({
     r1: DebateRoundSchema,
     r2: DebateRoundSchema.nullable(),

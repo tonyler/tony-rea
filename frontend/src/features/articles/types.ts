@@ -89,6 +89,7 @@ export interface ScrapedArticle {
   likes: number;
   score: number;
   url: string;
+  datePosted: string;
 }
 
 export interface VoiceSummary {
@@ -104,6 +105,8 @@ export interface ArticleResult {
   title: string;
   content: string;
   wordCount: number;
+  earlyStop?: boolean;
+  projectId?: string;
   debate: {
     r1: DebateRound;
     r2: DebateRound | null;

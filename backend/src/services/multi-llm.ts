@@ -9,15 +9,17 @@ export type ModelProvider = 'anthropic' | 'perplexity' | 'xai' | 'openai' | 'goo
 export type ModelId =
   // Via Anthropic Direct (article generation)
   | 'claude-sonnet-4-5'
-  // Via Perplexity Gateway
+  // Via Perplexity (native models only on /chat/completions)
   | 'sonar'
+  | 'sonar-pro'
   | 'gpt-5.2'
   | 'gpt-5-mini'
-  | 'gemini-3-pro'
+  // Via Google Direct
   | 'gemini-2.5-flash'
+  | 'gemini-3-pro'
+  // Via xAI Direct
   | 'grok-4-1-fast'
-  // Via xAI Direct (X search only)
-  | 'grok-4-1-fast-x';
+  | 'grok-4-1-fast-x';  // with X search
 
 interface ModelCapabilities {
   webSearch: boolean;
@@ -40,49 +42,56 @@ const MODELS: Record<ModelId, ModelConfig> = {
     pricing: { input: 3, output: 15 },
     capabilities: { webSearch: false, xSearch: false },
   },
-  // Perplexity Gateway models
+  // Perplexity Native - for web search
   'sonar': {
     provider: 'perplexity',
-    modelName: 'perplexity/sonar',
-    pricing: { input: 0.25, output: 2.5 },
+    modelName: 'sonar',
+    pricing: { input: 1, output: 1 },  // $1/M tokens
+    capabilities: { webSearch: true, xSearch: false },
+  },
+  'sonar-pro': {
+    provider: 'perplexity',
+    modelName: 'sonar-pro',
+    pricing: { input: 3, output: 15 },  // $3/M input, $15/M output
     capabilities: { webSearch: true, xSearch: false },
   },
   'gpt-5.2': {
     provider: 'perplexity',
-    modelName: 'openai/gpt-5.2',
-    pricing: { input: 1.75, output: 14 },
+    modelName: 'openai/gpt-5.2',  // Requires /v1/responses endpoint (not chat/completions)
+    pricing: { input: 0.04, output: 0.04 },
     capabilities: { webSearch: true, xSearch: false },
   },
   'gpt-5-mini': {
     provider: 'perplexity',
-    modelName: 'openai/gpt-5-mini',
-    pricing: { input: 0.25, output: 2.0 },
+    modelName: 'openai/gpt-5-mini',  // Requires /v1/responses endpoint (not chat/completions)
+    pricing: { input: 0.005, output: 0.005 },
     capabilities: { webSearch: true, xSearch: false },
+  },
+  // Google Direct - for non-search tasks
+  'gemini-2.5-flash': {
+    provider: 'google',
+    modelName: 'gemini-2.5-flash-preview-05-20',
+    pricing: { input: 0.15, output: 0.6 },  // Very cheap
+    capabilities: { webSearch: false, xSearch: false },
   },
   'gemini-3-pro': {
-    provider: 'perplexity',
-    modelName: 'google/gemini-3-pro-preview',
-    pricing: { input: 3, output: 15 },
-    capabilities: { webSearch: true, xSearch: false },
+    provider: 'google',
+    modelName: 'gemini-3-pro',
+    pricing: { input: 0.2, output: 0.6 },
+    capabilities: { webSearch: false, xSearch: false },
   },
-  'gemini-2.5-flash': {
-    provider: 'perplexity',
-    modelName: 'google/gemini-2.5-flash',
-    pricing: { input: 0.3, output: 2.5 },
-    capabilities: { webSearch: true, xSearch: false },
-  },
+  // xAI Direct - for slop detection and X search
   'grok-4-1-fast': {
-    provider: 'perplexity',
-    modelName: 'xai/grok-4-1-fast-non-reasoning',
+    provider: 'xai',
+    modelName: 'grok-4-1-fast-non-reasoning',
     pricing: { input: 0.2, output: 0.5 },
-    capabilities: { webSearch: true, xSearch: false },  // NO X search via Perplexity
+    capabilities: { webSearch: false, xSearch: false },
   },
-  // xAI Direct - ONLY for X search
   'grok-4-1-fast-x': {
     provider: 'xai',
     modelName: 'grok-4-1-fast-non-reasoning',
     pricing: { input: 0.2, output: 0.5 },
-    capabilities: { webSearch: false, xSearch: true },
+    capabilities: { webSearch: false, xSearch: true },  // X search enabled
   },
 };
 
@@ -129,6 +138,28 @@ export interface ContextFile {
   name: string;
   reason: string;
   content: string;
+}
+
+function estimateTokensFromChars(chars: number): number {
+  if (chars <= 0) return 0;
+  return Math.max(1, Math.ceil(chars / 4));
+}
+
+export function estimateMaxCallCost(
+  model: ModelId,
+  inputChars: number,
+  maxOutputTokens: number
+): number {
+  const config = MODELS[model];
+  if (!config) return 0;
+
+  const inputTokens = estimateTokensFromChars(inputChars);
+  const outputTokens = Math.max(0, maxOutputTokens);
+
+  const inputCost = (inputTokens / 1_000_000) * config.pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * config.pricing.output;
+
+  return inputCost + outputCost;
 }
 
 export async function callMultiLLM<T>(
@@ -296,13 +327,73 @@ async function callPerplexity(
   useWebSearch?: boolean,
   contextFiles?: ContextFile[]
 ): Promise<{ content: string; tokens: { input: number; output: number } }> {
-  const tools = useWebSearch ? [
-    {
-      type: 'web_search',
-      user_location: { country: 'US' },
-    },
-  ] : undefined;
+  // Native Perplexity models (sonar, sonar-pro) use /chat/completions
+  // Third-party models (openai/gpt-5.2, etc.) use /v1/responses
+  const isNativeModel = !modelName.includes('/');
 
+  if (isNativeModel) {
+    return callPerplexityChatCompletions(modelName, systemPrompt, userPrompt, temperature, maxTokens, contextFiles);
+  }
+  return callPerplexityResponses(modelName, systemPrompt, userPrompt, temperature, maxTokens, useWebSearch, contextFiles);
+}
+
+async function callPerplexityChatCompletions(
+  modelName: string,
+  systemPrompt: string,
+  userPrompt: string,
+  temperature: number,
+  maxTokens: number,
+  contextFiles?: ContextFile[]
+): Promise<{ content: string; tokens: { input: number; output: number } }> {
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: systemPrompt },
+  ];
+
+  if (contextFiles && contextFiles.length > 0) {
+    for (const file of contextFiles) {
+      messages.push({
+        role: 'user',
+        content: `FILE: ${file.name}\nREASON: ${file.reason}\nCONTENT:\n${file.content}`,
+      });
+    }
+  }
+
+  messages.push({ role: 'user', content: userPrompt });
+
+  const body: Record<string, unknown> = {
+    model: modelName,
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+  };
+
+  return perplexityFetchWithRetry(
+    'https://api.perplexity.ai/chat/completions',
+    body,
+    (data) => {
+      const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
+      const content = choices?.[0]?.message?.content || '';
+      const usage = data.usage as { prompt_tokens: number; completion_tokens: number } | undefined;
+      return {
+        content,
+        tokens: {
+          input: usage?.prompt_tokens || 0,
+          output: usage?.completion_tokens || 0,
+        },
+      };
+    }
+  );
+}
+
+async function callPerplexityResponses(
+  modelName: string,
+  systemPrompt: string,
+  userPrompt: string,
+  temperature: number,
+  maxTokens: number,
+  useWebSearch?: boolean,
+  contextFiles?: ContextFile[]
+): Promise<{ content: string; tokens: { input: number; output: number } }> {
   const input: Array<Record<string, unknown>> = [
     { type: 'message', role: 'system', content: systemPrompt },
   ];
@@ -326,80 +417,137 @@ async function callPerplexity(
     temperature,
   };
 
-  if (tools) {
-    body.tools = tools;
+  if (useWebSearch) {
+    body.tools = [{ type: 'web_search', user_location: { country: 'US' } }];
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000);  // 2 minute timeout
-
-  try {
-    const response = await fetch('https://api.perplexity.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${env.PERPLEXITY_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    const data = await response.json() as Record<string, unknown>;
-
-    if (!response.ok) {
-      const errMsg = JSON.stringify(data).slice(0, 300);
-      throw new Error(`Perplexity API error (${response.status}): ${errMsg}`);
-    }
-
-    // Extract text from output
-    let content = '';
-    const output = data.output as Array<{ type: string; content?: Array<{ type: string; text?: string }> }> | undefined;
-    if (output) {
-      for (const item of output) {
-        if (item.type === 'message' && item.content) {
-          for (const block of item.content) {
-            if (block.type === 'output_text' && block.text) {
-              content = block.text;
-            }
-          }
-        }
-      }
-    }
-
-    if (!content) {
-      console.error('[multi-llm] Perplexity returned empty content. Response keys:', Object.keys(data));
-      const outputArr = data.output as Array<Record<string, unknown>> | undefined;
-      if (outputArr) {
-        for (const item of outputArr) {
-          const blocks = item.content as Array<{ type: string; text?: string }> | undefined;
-          if (blocks) {
-            for (const block of blocks) {
-              if (block.text && block.text.length > content.length) {
+  return perplexityFetchWithRetry(
+    'https://api.perplexity.ai/v1/responses',
+    body,
+    (data) => {
+      let content = '';
+      const output = data.output as Array<{ type: string; content?: Array<{ type: string; text?: string }> }> | undefined;
+      if (output) {
+        for (const item of output) {
+          if (item.type === 'message' && item.content) {
+            for (const block of item.content) {
+              if (block.type === 'output_text' && block.text) {
                 content = block.text;
               }
             }
           }
         }
       }
-    }
 
-    const usage = data.usage as { input_tokens: number; output_tokens: number } | undefined;
-    return {
-      content,
-      tokens: {
-        input: usage?.input_tokens || 0,
-        output: usage?.output_tokens || 0,
-      },
-    };
-  } catch (error) {
-    clearTimeout(timeout);
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Perplexity API timeout (120s)');
+      if (!content) {
+        // Fallback: try extracting text from any content block
+        const outputArr = data.output as Array<Record<string, unknown>> | undefined;
+        if (outputArr) {
+          for (const item of outputArr) {
+            const blocks = item.content as Array<{ type: string; text?: string }> | undefined;
+            if (blocks) {
+              for (const block of blocks) {
+                if (block.text && block.text.length > content.length) {
+                  content = block.text;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const usage = data.usage as { input_tokens: number; output_tokens: number } | undefined;
+      return {
+        content,
+        tokens: {
+          input: usage?.input_tokens || 0,
+          output: usage?.output_tokens || 0,
+        },
+      };
     }
-    throw error;
+  );
+}
+
+async function perplexityFetchWithRetry(
+  url: string,
+  body: Record<string, unknown>,
+  extractResult: (data: Record<string, unknown>) => { content: string; tokens: { input: number; output: number } }
+): Promise<{ content: string; tokens: { input: number; output: number } }> {
+  const maxRetries = 3;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${env.PERPLEXITY_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      const responseText = await response.text();
+
+      if (responseText.trim().startsWith('<')) {
+        const errMsg = `API returned HTML error page (status ${response.status})`;
+        if (attempt < maxRetries - 1) {
+          const waitTime = Math.pow(2, attempt + 1) * 1000;
+          console.log(`[multi-llm] Perplexity returned HTML error, retrying in ${waitTime / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          lastError = new Error(errMsg);
+          continue;
+        }
+        throw new Error(errMsg);
+      }
+
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`Failed to parse Perplexity response as JSON: ${responseText.slice(0, 200)}`);
+      }
+
+      if (!response.ok) {
+        const errMsg = JSON.stringify(data).slice(0, 300);
+        if ((response.status === 429 || response.status >= 500) && attempt < maxRetries - 1) {
+          const waitTime = Math.pow(2, attempt + 1) * 1000;
+          console.log(`[multi-llm] Perplexity error ${response.status}, retrying in ${waitTime / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          lastError = new Error(`Perplexity API error (${response.status}): ${errMsg}`);
+          continue;
+        }
+        throw new Error(`Perplexity API error (${response.status}): ${errMsg}`);
+      }
+
+      const result = extractResult(data);
+
+      if (!result.content) {
+        console.error('[multi-llm] Perplexity returned empty content. Response:', JSON.stringify(data).slice(0, 500));
+      }
+
+      console.log(`[multi-llm] Perplexity (${body.model}) usage: input=${result.tokens.input}, output=${result.tokens.output}`);
+      return result;
+    } catch (error) {
+      clearTimeout(timeout);
+      if (error instanceof Error && error.name === 'AbortError') {
+        lastError = new Error('Perplexity API timeout (120s)');
+        if (attempt < maxRetries - 1) {
+          console.log(`[multi-llm] Perplexity timeout, retrying (attempt ${attempt + 1}/${maxRetries})`);
+          continue;
+        }
+      }
+      throw error;
+    }
   }
+
+  throw lastError || new Error('Perplexity API failed after retries');
 }
 
 async function callOpenAI(
@@ -647,9 +795,12 @@ function parseJsonResponse(content: string): { success: true; data: unknown } | 
   try {
     let jsonStr = content.trim();
 
-    // Remove markdown code blocks if present
-    jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-    jsonStr = jsonStr.trim();
+    // First, try to extract JSON from within code blocks
+    // Match ```json ... ``` or ``` ... ``` patterns
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch && codeBlockMatch[1]) {
+      jsonStr = codeBlockMatch[1].trim();
+    }
 
     // Extract JSON object between first { and last }
     const firstBrace = jsonStr.indexOf('{');

@@ -195,7 +195,7 @@ export default function Articles() {
               r1={articles.article.debate.r1}
               r2={articles.article.debate.r2}
               budget={articles.article.budget}
-              earlyStop={!articles.article.debate.r2}
+              earlyStop={!!articles.article.earlyStop}
             />
           </Card>
 

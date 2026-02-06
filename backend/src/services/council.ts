@@ -17,6 +17,10 @@ import {
   ContextFile,
 } from './multi-llm';
 import { getJudgeR1Prompt } from '../prompts/articles';
+import { formatRetrievedKnowledge } from './retrieval';
+import { readKBIndex, getEntriesByIds } from './storage';
+import { RetrievalResponseSchema } from '../schemas/output-schemas';
+import { getRetrievalPrompt } from '../prompts/retrieval';
 
 export type JudgeRole = 'fact-checker' | 'slop-detector' | 'originality-reviewer' | 'rules-enforcer';
 export type SearchMode = 'full' | 'none' | 'web-only' | 'x-only';
@@ -51,38 +55,39 @@ interface CouncilResult {
 }
 
 export interface CouncilOptions {
-  kbKnowledge?: string;
+  projectId?: string;
   judges?: JudgeConfig[];
   searchMode?: SearchMode;
+  judgeConfigWarnings?: string[];
 }
 
 export function getDefaultJudges(searchMode: SearchMode = 'full'): JudgeConfig[] {
   return [
     {
-      model: 'sonar',  // Perplexity native, cheap web search
+      model: 'gemini-2.5-flash',  // Google Direct - fast, cheap fact-checking via KB
       role: 'fact-checker',
-      label: 'sonar',
-      useWebSearch: searchMode === 'full' || searchMode === 'web-only',
-      useXSearch: false,
-    },
-    {
-      model: 'gemini-2.5-flash',  // Via Perplexity, cheap, good at patterns
-      role: 'originality-reviewer',
-      label: 'gemini-2.5-flash',
+      label: 'gemini-facts',
       useWebSearch: false,
       useXSearch: false,
     },
     {
-      model: 'grok-4-1-fast-x',  // xAI Direct - ONLY way to get X search
+      model: 'gemini-2.5-flash',  // Google Direct - fast, cheap originality analysis
+      role: 'originality-reviewer',
+      label: 'gemini-originality',
+      useWebSearch: false,
+      useXSearch: false,
+    },
+    {
+      model: 'grok-4-1-fast-x',  // xAI Direct - X search for slop/trends detection
       role: 'slop-detector',
-      label: 'grok-4-1-fast-x',
+      label: 'grok-slop',
       useWebSearch: false,
       useXSearch: searchMode === 'full' || searchMode === 'x-only',
     },
     {
-      model: 'gemini-2.5-flash',  // Via Perplexity, cheap, good at rules
+      model: 'gemini-2.5-flash',  // Google Direct - consistent rules enforcement
       role: 'rules-enforcer',
-      label: 'rules-enforcer',
+      label: 'gemini-rules',
       useWebSearch: false,
       useXSearch: false,
     },
@@ -145,18 +150,26 @@ export async function runCouncil(
   budget: BudgetTracker,
   options: CouncilOptions = {}
 ): Promise<CouncilResult> {
-  const { kbKnowledge, searchMode = 'full' } = options;
+  const { projectId, searchMode = 'full', judgeConfigWarnings } = options;
+  const warnings: string[] = [...(judgeConfigWarnings ?? [])];
   const judges = options.judges ?? getDefaultJudges(searchMode);
   const minJudgesRequired = Math.min(judges.length, 2);
 
-  console.log(`[council] Starting council evaluation with ${judges.length} judges...${kbKnowledge ? ' (with KB facts)' : ''}`);
+  console.log(`[council] Starting council evaluation with ${judges.length} judges...${projectId ? ' (per-judge KB retrieval)' : ''}`);
 
   const r1Start = Date.now();
-  const r1Result = await runJudgeRound(article, budget, judges, kbKnowledge);
+  const r1Result = await runJudgeRound(article, budget, judges, projectId);
   console.log(`[council] Completed in ${((Date.now() - r1Start) / 1000).toFixed(1)}s`);
 
   if (!r1Result.success && r1Result.judgeCount < minJudgesRequired) {
-    throw new Error(`Council failed: insufficient judges (${r1Result.judgeCount}/${minJudgesRequired})`);
+    // If at least 1 judge succeeded, proceed with warnings instead of failing
+    if (r1Result.judgeCount >= 1) {
+      const msg = `Only ${r1Result.judgeCount}/${minJudgesRequired} council judges completed; evaluation proceeds with reduced coverage.`;
+      console.warn(`[council] ${msg}`);
+      warnings.push(msg);
+    } else {
+      throw new Error(`Council failed: insufficient judges (${r1Result.judgeCount}/${minJudgesRequired})`);
+    }
   }
 
   const r1 = r1Result.round;
@@ -190,7 +203,7 @@ export async function runCouncil(
     earlyStop: skipFinalRevision,
     skipFinalRevision,
     allFlaggedPhrases,
-    warnings: [],
+    warnings,
   };
 }
 
@@ -247,13 +260,11 @@ async function runJudgeRound(
   article: string,
   budget: BudgetTracker,
   judges: JudgeConfig[],
-  kbKnowledge?: string
+  projectId?: string
 ): Promise<RoundResult> {
+  const kbIndex = projectId ? await readKBIndex(projectId) : '';
   const judgePromises = judges.map((judge) => {
-    // Judges with search capabilities don't need KB context
-    const hasSearch = judge.useWebSearch || judge.useXSearch;
-    const judgeKb = hasSearch ? undefined : kbKnowledge;
-    return judgeArticle(judge, article, budget, judgeKb);
+    return judgeArticle(judge, article, budget, projectId, kbIndex);
   });
 
   const results = await Promise.allSettled(judgePromises);
@@ -302,15 +313,21 @@ async function judgeArticle(
   judge: JudgeConfig,
   article: string,
   _budget: BudgetTracker,
-  kbKnowledge?: string
+  projectId?: string,
+  kbIndex?: string
 ): Promise<JudgeResult> {
   const startTime = Date.now();
 
-  const prompt = getJudgeR1Prompt(judge.role, judge.label, article, kbKnowledge);
+  const kbKnowledge = await loadJudgeKbKnowledge(projectId, kbIndex, judge, article);
+
+  const prompt = getJudgeR1Prompt(judge.role, judge.label, article, kbKnowledge, {
+    useWebSearch: judge.useWebSearch,
+  });
 
   const hasKB = !!kbKnowledge;
   const usesTools = judge.useWebSearch || judge.useXSearch;
-  const maxTokens = usesTools ? 16384 : (hasKB ? 8192 : 6144);
+  // Increased token limits to prevent response truncation
+  const maxTokens = usesTools ? 16384 : (hasKB ? 12288 : 10240);
 
   const contextFiles = kbKnowledge ? buildKbContextFiles(kbKnowledge) : undefined;
   const result = await callMultiLLM(judge.model, {
@@ -354,6 +371,51 @@ async function judgeArticle(
   };
 }
 
+const MAX_RETRIEVAL_CHARS = 4000;
+
+async function loadJudgeKbKnowledge(
+  projectId: string | undefined,
+  kbIndex: string | undefined,
+  judge: JudgeConfig,
+  article: string
+): Promise<string | undefined> {
+  if (!projectId || !kbIndex || kbIndex.trim() === '') {
+    return undefined;
+  }
+
+  const snippet = article.length > MAX_RETRIEVAL_CHARS
+    ? `${article.slice(0, MAX_RETRIEVAL_CHARS)}\n...[truncated]`
+    : article;
+
+  const query = `Judge role: ${judge.role}\nJudge label: ${judge.label}\n\nArticle to review:\n${snippet}`;
+
+  const retrievalPrompt = getRetrievalPrompt(kbIndex);
+  const retrievalResult = await callMultiLLM(judge.model, {
+    systemPrompt: retrievalPrompt,
+    userPrompt: query,
+    temperature: 0.2,
+    maxTokens: 512,
+    useWebSearch: false,
+    useXSearch: false,
+  }, RetrievalResponseSchema);
+
+  if (!retrievalResult.success || !retrievalResult.data) {
+    return undefined;
+  }
+
+  const selectedIds = retrievalResult.data.relevant_entry_ids || [];
+  if (selectedIds.length === 0) {
+    return undefined;
+  }
+
+  const entries = await getEntriesByIds(projectId, selectedIds);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return formatRetrievedKnowledge(entries);
+}
+
 function buildKbContextFiles(kbKnowledge: string): ContextFile[] {
   const sections = kbKnowledge
     .split('\n\n---\n\n')
@@ -388,6 +450,15 @@ function mergeDebateRound(
   opinions: Record<string, JudgeOpinion>
 ): DebateRound {
   const opinionList = Object.values(opinions);
+  if (opinionList.length === 0) {
+    return {
+      round: 1,
+      opinions: {},
+      avg_scores: {},
+      consensus_fixes: [],
+      priority_fixes: [],
+    };
+  }
 
   const qualityKeys: (keyof typeof opinionList[0]['quality_scores'])[] = [
     'ai_slop', 'buzzword_density', 'human_voice', 'originality',
@@ -436,7 +507,7 @@ function mergeDebateRound(
   }
 
   const weightedOverall = totalWeight > 0 ? weightedSum / totalWeight : 0;
-  avg_scores['overall'] = Math.min(judgeOverall, weightedOverall);
+  avg_scores['overall'] = weightedOverall;
   avg_scores['weighted_overall'] = weightedOverall;
   avg_scores['judge_overall'] = judgeOverall;
 

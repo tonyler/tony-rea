@@ -12,6 +12,7 @@ import { initializeProviders } from './services/multi-llm';
 import { env, appConfig } from './config';
 
 const app = express();
+app.set('trust proxy', 'loopback');
 
 // Middleware
 app.use(cors({
@@ -82,7 +83,7 @@ async function startServer() {
     await cleanExpiredSessions();
 
     // Start server
-    app.listen(appConfig.port, () => {
+    app.listen(appConfig.port, appConfig.host, () => {
       console.log(`Server running on port ${appConfig.port}`);
       console.log(`Environment: ${appConfig.nodeEnv}`);
       console.log(`Health check: http://localhost:${appConfig.port}/api/health`);
