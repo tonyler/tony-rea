@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { getExampleArticles } from '../services/voice-analyzer';
+import { getExampleArticles, getVoiceProfile } from '../services/voice-analyzer';
 import { Article } from '../services/x-scraper';
 import { runCouncil, buildJudgeConfigs, getDefaultJudges } from '../services/council';
 import type { SearchMode } from '../services/council';
@@ -22,6 +22,25 @@ import { retrieveRelevantEntries, formatRetrievedKnowledge } from '../services/r
 
 const router = Router();
 
+const MODEL_LABELS: Record<string, string> = {
+  'claude-sonnet-4-5': 'Claude Sonnet 4.5',
+  'claude-haiku-4-5': 'Claude Haiku 4.5',
+  'claude-opus-4-5': 'Claude Opus 4.5',
+  'gpt-5.2': 'GPT-5.2',
+  'gpt-5.1': 'GPT-5.1',
+  'gpt-5-mini': 'GPT-5 Mini',
+  'gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'gemini-3-flash': 'Gemini 3 Flash',
+  'gemini-3-pro': 'Gemini 3 Pro',
+  'grok-4-1-fast': 'Grok 4.1',
+  'grok-4-1-fast-x': 'Grok 4.1',
+};
+
+function modelLabel(id: string): string {
+  return MODEL_LABELS[id] || id;
+}
+
 // Initialize LLM providers and article storage on module load
 initializeProviders();
 initializeArticleStorage();
@@ -37,11 +56,15 @@ const ArticleRequestSchema = z.object({
 
 const ModelIdEnum = z.enum([
   'claude-sonnet-4-5',
-  'sonar',
+  'claude-haiku-4-5',
+  'claude-opus-4-5',
   'gpt-5.2',
+  'gpt-5.1',
   'gpt-5-mini',
-  'gemini-3-pro',
   'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-3-flash',
+  'gemini-3-pro',
   'grok-4-1-fast',
   'grok-4-1-fast-x',
 ]);
@@ -113,6 +136,16 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       return;
     }
 
+    // SSE setup for real-time progress
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const sendProgress = (message: string) => {
+      res.write(`data: ${JSON.stringify({ type: 'progress', message })}\n\n`);
+    };
+
     const {
       voiceHandle, content, request, wordCount, constraints, projectId,
       searchMode, draftModel, revisionModel, judges: judgesInput, councilMode,
@@ -129,6 +162,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
     }
 
     // Step 1: Get example articles for voice
+    sendProgress('Loading voice examples...');
     console.log('[articles] Step 1: Fetching example articles...');
     let exampleArticles: Article[];
     try {
@@ -136,11 +170,15 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       console.log(`[articles] Got ${exampleArticles.length} example articles`);
     } catch (error) {
       console.error('[articles] Failed to get examples:', error);
-      res.status(400).json({
-        error: 'Example articles not available',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      res.write(`data: ${JSON.stringify({ type: 'error', message: error instanceof Error ? error.message : 'Example articles not available' })}\n\n`);
+      res.end();
       return;
+    }
+
+    // Step 1.5a: Load voice profile if available
+    const voiceProfile = await getVoiceProfile(voiceHandle);
+    if (voiceProfile) {
+      console.log(`[articles] Voice profile loaded for @${voiceHandle}`);
     }
 
     // Step 1.5: Retrieve relevant KB entries if projectId is provided
@@ -150,6 +188,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
     let kbKnowledge = '';
 
     if (projectId) {
+      sendProgress('Retrieving knowledge base entries...');
       console.log(`[articles] Step 1.5: Retrieving KB entries for project=${projectId}...`);
       const retrieval = await retrieveRelevantEntries(projectId, kbQuery);
 
@@ -162,6 +201,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
     }
 
     // Step 2: Generate initial article with selected draft model
+    sendProgress(`${modelLabel(draftModel)} is writing the draft...`);
     console.log(`[articles] Step 2: Calling ${draftModel}...`);
     let budget = createBudgetTracker();
     const warnings: string[] = [];
@@ -175,7 +215,8 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       exampleArticles,
       chunks,
       constraints,
-      articleRequest
+      articleRequest,
+      voiceProfile ?? undefined
     );
 
     const ArticleContentSchema = z.object({
@@ -224,7 +265,8 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
 
     if (!v1Result.success || !v1Result.data) {
       console.error(`[articles] ${draftModel} draft failed:`, v1Result.error);
-      res.status(500).json({ error: 'Article generation failed', details: v1Result.error });
+      res.write(`data: ${JSON.stringify({ type: 'error', message: v1Result.error || 'Article generation failed' })}\n\n`);
+      res.end();
       return;
     }
 
@@ -262,6 +304,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
         judges: judgeConfigs,
         searchMode: searchMode as SearchMode,
         judgeConfigWarnings,
+        onProgress: sendProgress,
       });
       budget = councilResult.budget;
       warnings.push(...councilResult.warnings);
@@ -281,7 +324,8 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
         initialArticle.content,
         roundToUse,
         exampleArticles,
-        flaggedPhrases
+        flaggedPhrases,
+        voiceProfile ?? undefined
       );
 
       const estimatedRevisionCost = estimateMaxCallCost(
@@ -293,6 +337,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       if (!canAffordCall(budget, estimatedRevisionCost)) {
         console.log(`[articles] Step 4: Skipping final revision (budget remaining: $${budget.remaining.toFixed(4)}, est=$${estimatedRevisionCost.toFixed(4)})`);
       } else {
+        sendProgress(`${modelLabel(revisionModel)} is polishing the final article...`);
         console.log(`[articles] Step 4: Running final revision with ${revisionModel} (budget remaining: $${budget.remaining.toFixed(4)}, est=$${estimatedRevisionCost.toFixed(4)})`);
         const finalResult = await callMultiLLM(revisionModel, {
           systemPrompt: finalPrompt.system,
@@ -350,11 +395,19 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
     // Auto-save so revisions work immediately
     await saveArticle(result);
 
+    sendProgress('Done!');
     console.log(`[articles] Done! id=${articleId}, words=${result.wordCount}, cost=$${budget.total.toFixed(4)}`);
-    res.json(result);
+    res.write(`data: ${JSON.stringify({ type: 'done', data: result })}\n\n`);
+    res.end();
   } catch (error) {
     console.error('[articles] Unhandled error:', error);
-    next(error);
+    if (!res.headersSent) {
+      next(error);
+    } else {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      res.write(`data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`);
+      res.end();
+    }
   }
 });
 

@@ -15,6 +15,7 @@ export default function VoiceAnalyzer() {
   const [voices, setVoices] = useState<VoiceSummary[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<VoiceSummary | null>(null);
   const [expandedArticle, setExpandedArticle] = useState<string | null>(null);
+  const [analyzingProfile, setAnalyzingProfile] = useState(false);
 
   useEffect(() => {
     const cachedVoices = voicesStorage.getVoices();
@@ -105,6 +106,31 @@ export default function VoiceAnalyzer() {
       setError(err instanceof Error ? err.message : 'Voice analysis failed');
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const handleAnalyzeProfile = async (handle: string) => {
+    setAnalyzingProfile(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await voicesApi.analyzeProfile(handle);
+      setSuccess(`Voice profile analyzed for @${handle}. It will be used in future article generation.`);
+      // Refresh voice data to get updated has_profile flag
+      const updated = await voicesApi.get(handle);
+      setSelectedVoice(updated);
+      voicesStorage.setSelectedVoice(updated);
+      voicesStorage.updateVoice(updated);
+      setVoices((prev) => {
+        const newVoices = prev.map((v) => v.handle === handle ? { ...v, has_profile: true } : v);
+        voicesStorage.setVoices(newVoices);
+        return newVoices;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Voice profile analysis failed');
+    } finally {
+      setAnalyzingProfile(false);
     }
   };
 
@@ -218,14 +244,17 @@ export default function VoiceAnalyzer() {
               <button
                 key={voice.handle}
                 onClick={() => handleSelectVoice(voice.handle)}
-                className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition-colors ${
+                className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition-colors flex items-center gap-1.5 ${
                   selectedVoice?.handle === voice.handle
                     ? 'bg-emerald-400/20 text-emerald-200 border border-emerald-400/40'
                     : 'bg-void-400/30 text-smoke-100 border border-smoke-400/20 hover:text-cream-100'
                 }`}
               >
+                {voice.has_profile && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Voice profile active" />
+                )}
                 @{voice.handle}
-                <span className="ml-1 text-smoke-300">({voice.article_count})</span>
+                <span className="text-smoke-300">({voice.article_count})</span>
               </button>
             ))}
           </div>
@@ -298,6 +327,42 @@ export default function VoiceAnalyzer() {
               <p className="text-xs text-smoke-200">Top Score</p>
             </div>
           </div>
+
+          <div className="flex items-center gap-3 mb-6">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+              selectedVoice.has_profile
+                ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                : 'bg-void-400/20 text-smoke-200 border border-smoke-400/20'
+            }`}>
+              {selectedVoice.has_profile ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  Voice profile active
+                </>
+              ) : (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-smoke-400" />
+                  No voice profile
+                </>
+              )}
+            </div>
+            <Button
+              onClick={() => handleAnalyzeProfile(selectedVoice.handle)}
+              disabled={analyzingProfile}
+              variant="secondary"
+            >
+              {analyzingProfile ? 'Analyzing...' : selectedVoice.has_profile ? 'Re-Analyze Voice' : 'Analyze Voice'}
+            </Button>
+          </div>
+
+          {analyzingProfile && (
+            <div className="mb-6">
+              <LoadingSpinner message="Analyzing voice patterns across all articles..." />
+              <p className="text-xs text-smoke-200 text-center mt-2">
+                This runs LLM analysis on all scraped articles. Usually takes 15-30 seconds.
+              </p>
+            </div>
+          )}
 
           {selectedVoice.articles && selectedVoice.articles.length > 0 && (
             <div className="space-y-3">

@@ -97,7 +97,16 @@ export interface VoiceSummary {
   scraped_at: string;
   article_count: number;
   top_article_count: number;
+  has_profile?: boolean;
   articles?: ScrapedArticle[];
+}
+
+export interface VoiceProfileMeta {
+  handle: string;
+  analyzed_at: string;
+  article_count: number;
+  model_used: string;
+  profile: Record<string, unknown>;
 }
 
 export interface ArticleResult {
@@ -119,14 +128,18 @@ export interface ArticleResult {
 }
 
 export type ModelId =
-  | 'claude-sonnet-4-5'  // Anthropic direct (article generation)
-  | 'sonar'              // Perplexity native (web search)
+  | 'claude-sonnet-4-5'  // Anthropic Direct (prompt caching)
+  | 'claude-haiku-4-5'   // via Perplexity
+  | 'claude-opus-4-5'    // via Perplexity
   | 'gpt-5.2'            // via Perplexity
+  | 'gpt-5.1'            // via Perplexity
   | 'gpt-5-mini'         // via Perplexity
-  | 'gemini-3-pro'       // via Perplexity
   | 'gemini-2.5-flash'   // via Perplexity
-  | 'grok-4-1-fast'      // via Perplexity (no X search)
-  | 'grok-4-1-fast-x';   // xAI direct (X search)
+  | 'gemini-2.5-pro'     // via Perplexity
+  | 'gemini-3-flash'     // via Perplexity
+  | 'gemini-3-pro'       // via Perplexity
+  | 'grok-4-1-fast'      // via Perplexity
+  | 'grok-4-1-fast-x';   // xAI Direct (X search)
 export type SearchMode = 'full' | 'none' | 'web-only' | 'x-only';
 export type CouncilMode = 'skip' | 'standard';
 export type JudgeRole = 'fact-checker' | 'slop-detector' | 'originality-reviewer' | 'rules-enforcer';

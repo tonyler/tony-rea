@@ -2,8 +2,8 @@ import type { Project } from '../shared/types';
 import type { AssistantResponse, EducationResponse, GrammarResponse } from '../features/assistant/types';
 import type { Entry, KBPatchPlan } from '../features/feed/types';
 import type { ThreadResult, SavedThread } from '../features/threads/types';
-import type { ArticleResult, ArticleSummary, VoiceSummary, LLMConfig } from '../features/articles/types';
-import { request } from '../shared/api';
+import type { ArticleResult, ArticleSummary, VoiceSummary, VoiceProfileMeta, LLMConfig } from '../features/articles/types';
+import { request, API_BASE } from '../shared/api';
 
 // Project API
 export const projectsApi = {
@@ -177,11 +177,36 @@ export const tagsApi = {
     }),
 };
 
+// SSE event types from /articles/generate
+export interface SSEProgressEvent {
+  type: 'progress';
+  message: string;
+}
+export interface SSEDoneEvent {
+  type: 'done';
+  data: ArticleResult;
+}
+export interface SSEErrorEvent {
+  type: 'error';
+  message: string;
+}
+export type SSEEvent = SSEProgressEvent | SSEDoneEvent | SSEErrorEvent;
+
 // Articles API
 export const articlesApi = {
-  generate: (voiceHandle: string, content: string, wordCount?: number, constraints?: string, projectId?: string, llmConfig?: LLMConfig) =>
-    request<ArticleResult>('/articles/generate', {
+  generateStream: async (
+    voiceHandle: string,
+    content: string,
+    wordCount: number | undefined,
+    constraints: string | undefined,
+    projectId: string | undefined,
+    llmConfig: LLMConfig | undefined,
+    onProgress: (message: string) => void
+  ): Promise<ArticleResult> => {
+    const response = await fetch(`${API_BASE}/articles/generate`, {
       method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         voiceHandle, content, wordCount, constraints, projectId,
         ...(llmConfig ? {
@@ -192,7 +217,57 @@ export const articlesApi = {
           judges: llmConfig.judges,
         } : {}),
       }),
-    }),
+    });
+
+    if (!response.ok || !response.body) {
+      const err = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(err.error || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: ArticleResult | null = null;
+
+    const processLines = (lines: string[]) => {
+      for (const raw of lines) {
+        const line = raw.replace(/\r$/, '');
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const event: SSEEvent = JSON.parse(line.slice(6));
+          if (event.type === 'progress') {
+            onProgress(event.message);
+          } else if (event.type === 'done') {
+            result = event.data;
+          } else if (event.type === 'error') {
+            throw new Error(event.message);
+          }
+        } catch (e) {
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      processLines(lines);
+    }
+
+    // Flush decoder and process any remaining buffered data
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      processLines(buffer.split('\n'));
+    }
+
+    if (!result) throw new Error('Stream ended without result');
+    return result;
+  },
 
   revise: (articleId: string, instruction: string, preserveDebate: boolean) =>
     request<ArticleResult>(`/articles/${articleId}/revise`, {
@@ -223,4 +298,12 @@ export const voicesApi = {
     request<VoiceSummary>(`/voices/${encodeURIComponent(handle)}/refresh`, {
       method: 'POST',
     }),
+
+  analyzeProfile: (handle: string) =>
+    request<VoiceProfileMeta>(`/voices/${encodeURIComponent(handle)}/analyze`, {
+      method: 'POST',
+    }),
+
+  getProfile: (handle: string) =>
+    request<VoiceProfileMeta>(`/voices/${encodeURIComponent(handle)}/profile`),
 };

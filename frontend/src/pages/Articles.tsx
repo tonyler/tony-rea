@@ -131,10 +131,7 @@ export default function Articles() {
 
           {articles.generating && (
             <div className="mt-6">
-              <LoadingSpinner message={`Generating article with ${articles.llmConfig.draftModel}...`} />
-              <p className="text-xs text-smoke-200 text-center mt-2">
-                This may take 30-60 seconds. The council will evaluate the article.
-              </p>
+              <LoadingSpinner message={articles.progressMessage || 'Starting...'} />
             </div>
           )}
         </Card>

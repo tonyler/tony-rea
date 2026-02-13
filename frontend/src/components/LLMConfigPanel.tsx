@@ -7,11 +7,15 @@ interface LLMConfigPanelProps {
 
 const MODEL_OPTIONS: { value: ModelId; label: string }[] = [
   { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-  { value: 'sonar', label: 'Sonar (Perplexity)' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+  { value: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
   { value: 'gpt-5.2', label: 'GPT-5.2' },
+  { value: 'gpt-5.1', label: 'GPT-5.1' },
   { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-  { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
   { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { value: 'gemini-3-flash', label: 'Gemini 3 Flash' },
+  { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
   { value: 'grok-4-1-fast', label: 'Grok 4.1 Fast' },
   { value: 'grok-4-1-fast-x', label: 'Grok 4.1 + X Search' },
 ];
@@ -32,24 +36,32 @@ const SEARCH_MODE_OPTIONS: { value: SearchMode; label: string }[] = [
 
 const MODEL_CAPABILITIES: Record<ModelId, { webSearch: boolean; xSearch: boolean }> = {
   'claude-sonnet-4-5': { webSearch: false, xSearch: false },
-  'sonar': { webSearch: true, xSearch: false },
+  'claude-haiku-4-5': { webSearch: true, xSearch: false },
+  'claude-opus-4-5': { webSearch: true, xSearch: false },
   'gpt-5.2': { webSearch: true, xSearch: false },
+  'gpt-5.1': { webSearch: true, xSearch: false },
   'gpt-5-mini': { webSearch: true, xSearch: false },
-  'gemini-3-pro': { webSearch: true, xSearch: false },
   'gemini-2.5-flash': { webSearch: true, xSearch: false },
+  'gemini-2.5-pro': { webSearch: true, xSearch: false },
+  'gemini-3-flash': { webSearch: true, xSearch: false },
+  'gemini-3-pro': { webSearch: true, xSearch: false },
   'grok-4-1-fast': { webSearch: true, xSearch: false },
   'grok-4-1-fast-x': { webSearch: false, xSearch: true },
 };
 
 const MODEL_DRAFT_COST: Record<ModelId, number> = {
   'claude-sonnet-4-5': 0.04,
-  'sonar': 0.008,
+  'claude-haiku-4-5': 0.015,
+  'claude-opus-4-5': 0.08,
   'gpt-5.2': 0.04,
-  'gpt-5-mini': 0.005,
-  'gemini-3-pro': 0.05,
+  'gpt-5.1': 0.03,
+  'gpt-5-mini': 0.006,
   'gemini-2.5-flash': 0.008,
-  'grok-4-1-fast': 0.005,
-  'grok-4-1-fast-x': 0.005,
+  'gemini-2.5-pro': 0.03,
+  'gemini-3-flash': 0.01,
+  'gemini-3-pro': 0.045,
+  'grok-4-1-fast': 0.003,
+  'grok-4-1-fast-x': 0.003,
 };
 
 function getWarnings(config: LLMConfig): string[] {
@@ -92,7 +104,7 @@ export function LLMConfigPanel({ config, onChange }: LLMConfigPanelProps) {
     if (config.judges.length >= 4) return;
     onChange({
       ...config,
-      judges: [...config.judges, { model: 'gemini-2.5-flash' as ModelId, role: 'fact-checker' as JudgeRole }],
+      judges: [...config.judges, { model: 'gpt-5-mini' as ModelId, role: 'fact-checker' as JudgeRole }],
     });
   };
 

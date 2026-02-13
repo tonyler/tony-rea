@@ -1,25 +1,29 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { env } from '../config/env';
 
-export type ModelProvider = 'anthropic' | 'perplexity' | 'xai' | 'openai' | 'google';
+export type ModelProvider = 'anthropic' | 'perplexity' | 'xai';
 
 export type ModelId =
-  // Via Anthropic Direct (article generation)
+  // Anthropic Direct (prompt caching for draft/revision)
   | 'claude-sonnet-4-5'
-  // Via Perplexity (native models only on /chat/completions)
-  | 'sonar'
-  | 'sonar-pro'
+  // Via Perplexity v1/responses — Anthropic
+  | 'claude-haiku-4-5'
+  | 'claude-opus-4-5'
+  // Via Perplexity v1/responses — OpenAI
   | 'gpt-5.2'
+  | 'gpt-5.1'
   | 'gpt-5-mini'
-  // Via Google Direct
+  // Via Perplexity v1/responses — Google
   | 'gemini-2.5-flash'
+  | 'gemini-2.5-pro'
+  | 'gemini-3-flash'
   | 'gemini-3-pro'
-  // Via xAI Direct
+  // Via Perplexity v1/responses — xAI
   | 'grok-4-1-fast'
-  | 'grok-4-1-fast-x';  // with X search
+  // xAI Direct (X/Twitter search)
+  | 'grok-4-1-fast-x';
 
 interface ModelCapabilities {
   webSearch: boolean;
@@ -35,79 +39,93 @@ interface ModelConfig {
 }
 
 const MODELS: Record<ModelId, ModelConfig> = {
-  // Anthropic Direct - for article generation
+  // Anthropic Direct — draft/revision with prompt caching
   'claude-sonnet-4-5': {
     provider: 'anthropic',
     modelName: 'claude-sonnet-4-5-20250929',
     pricing: { input: 3, output: 15 },
     capabilities: { webSearch: false, xSearch: false },
   },
-  // Perplexity Native - for web search
-  'sonar': {
+  // Via Perplexity v1/responses — Anthropic
+  'claude-haiku-4-5': {
     provider: 'perplexity',
-    modelName: 'sonar',
-    pricing: { input: 1, output: 1 },  // $1/M tokens
+    modelName: 'anthropic/claude-haiku-4-5',
+    pricing: { input: 1, output: 5 },
     capabilities: { webSearch: true, xSearch: false },
   },
-  'sonar-pro': {
+  'claude-opus-4-5': {
     provider: 'perplexity',
-    modelName: 'sonar-pro',
-    pricing: { input: 3, output: 15 },  // $3/M input, $15/M output
+    modelName: 'anthropic/claude-opus-4-5',
+    pricing: { input: 5, output: 25 },
     capabilities: { webSearch: true, xSearch: false },
   },
+  // Via Perplexity v1/responses — OpenAI
   'gpt-5.2': {
     provider: 'perplexity',
-    modelName: 'openai/gpt-5.2',  // Requires /v1/responses endpoint (not chat/completions)
-    pricing: { input: 0.04, output: 0.04 },
+    modelName: 'openai/gpt-5.2',
+    pricing: { input: 1.75, output: 14 },
+    capabilities: { webSearch: true, xSearch: false },
+  },
+  'gpt-5.1': {
+    provider: 'perplexity',
+    modelName: 'openai/gpt-5.1',
+    pricing: { input: 1.25, output: 10 },
     capabilities: { webSearch: true, xSearch: false },
   },
   'gpt-5-mini': {
     provider: 'perplexity',
-    modelName: 'openai/gpt-5-mini',  // Requires /v1/responses endpoint (not chat/completions)
-    pricing: { input: 0.005, output: 0.005 },
+    modelName: 'openai/gpt-5-mini',
+    pricing: { input: 0.25, output: 2 },
     capabilities: { webSearch: true, xSearch: false },
   },
-  // Google Direct - for non-search tasks
+  // Via Perplexity v1/responses — Google
   'gemini-2.5-flash': {
-    provider: 'google',
-    modelName: 'gemini-2.5-flash-preview-05-20',
-    pricing: { input: 0.15, output: 0.6 },  // Very cheap
-    capabilities: { webSearch: false, xSearch: false },
+    provider: 'perplexity',
+    modelName: 'google/gemini-2.5-flash',
+    pricing: { input: 0.3, output: 2.5 },
+    capabilities: { webSearch: true, xSearch: false },
+  },
+  'gemini-2.5-pro': {
+    provider: 'perplexity',
+    modelName: 'google/gemini-2.5-pro',
+    pricing: { input: 1.25, output: 10 },
+    capabilities: { webSearch: true, xSearch: false },
+  },
+  'gemini-3-flash': {
+    provider: 'perplexity',
+    modelName: 'google/gemini-3-flash-preview',
+    pricing: { input: 0.5, output: 3 },
+    capabilities: { webSearch: true, xSearch: false },
   },
   'gemini-3-pro': {
-    provider: 'google',
-    modelName: 'gemini-3-pro',
-    pricing: { input: 0.2, output: 0.6 },
-    capabilities: { webSearch: false, xSearch: false },
+    provider: 'perplexity',
+    modelName: 'google/gemini-3-pro-preview',
+    pricing: { input: 2.5, output: 15 },
+    capabilities: { webSearch: true, xSearch: false },
   },
-  // xAI Direct - for slop detection and X search
+  // Via Perplexity v1/responses — xAI
   'grok-4-1-fast': {
-    provider: 'xai',
-    modelName: 'grok-4-1-fast-non-reasoning',
+    provider: 'perplexity',
+    modelName: 'xai/grok-4-1-fast-non-reasoning',
     pricing: { input: 0.2, output: 0.5 },
-    capabilities: { webSearch: false, xSearch: false },
+    capabilities: { webSearch: true, xSearch: false },
   },
+  // xAI Direct — X/Twitter search
   'grok-4-1-fast-x': {
     provider: 'xai',
     modelName: 'grok-4-1-fast-non-reasoning',
     pricing: { input: 0.2, output: 0.5 },
-    capabilities: { webSearch: false, xSearch: true },  // X search enabled
+    capabilities: { webSearch: false, xSearch: true },
   },
 };
 
+const JSON_RETRY_SUFFIX = '\n\nCRITICAL: Your previous response was not valid JSON. You MUST respond with ONLY a raw JSON object — no markdown, no code blocks, no explanatory text. Start with { and end with }.';
+
 let anthropicClient: Anthropic | null = null;
-let openaiClient: OpenAI | null = null;
-let googleClient: GoogleGenerativeAI | null = null;
 let xaiClient: OpenAI | null = null;
 
 export function initializeProviders(): void {
   anthropicClient = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  openaiClient = env.OPENAI_API_KEY
-    ? new OpenAI({ apiKey: env.OPENAI_API_KEY })
-    : null;
-  googleClient = env.GOOGLE_API_KEY
-    ? new GoogleGenerativeAI(env.GOOGLE_API_KEY)
-    : null;
   xaiClient = env.XAI_API_KEY
     ? new OpenAI({
         apiKey: env.XAI_API_KEY,
@@ -162,6 +180,29 @@ export function estimateMaxCallCost(
   return inputCost + outputCost;
 }
 
+async function callProviderRaw(
+  config: ModelConfig,
+  options: MultiLLMOptions,
+  temperature: number,
+  maxTokens: number
+): Promise<{ content: string; tokens: { input: number; output: number } }> {
+  switch (config.provider) {
+    case 'anthropic':
+      if (!anthropicClient) throw new Error('Anthropic API key not configured');
+      return callAnthropic(config.modelName, options.systemPrompt, options.userPrompt, temperature, maxTokens);
+    case 'perplexity':
+      return callPerplexity(
+        config.modelName, options.systemPrompt, options.userPrompt,
+        temperature, maxTokens, options.useWebSearch, options.contextFiles
+      );
+    case 'xai':
+      if (!xaiClient) throw new Error('xAI API key not configured');
+      return callXAI(config.modelName, options.systemPrompt, options.userPrompt, temperature, maxTokens, options.useXSearch);
+    default:
+      throw new Error(`Unsupported provider: ${config.provider}`);
+  }
+}
+
 export async function callMultiLLM<T>(
   model: ModelId,
   options: MultiLLMOptions,
@@ -169,95 +210,50 @@ export async function callMultiLLM<T>(
 ): Promise<MultiLLMResult<T>> {
   const config = MODELS[model];
   if (!config) {
-    return {
-      success: false,
-      error: `Unknown model: ${model}`,
-      tokens: { input: 0, output: 0 },
-      cost: 0,
-    };
+    return { success: false, error: `Unknown model: ${model}`, tokens: { input: 0, output: 0 }, cost: 0 };
   }
 
-  const {
-    systemPrompt,
-    userPrompt,
-    temperature: requestedTemp = 0.7,
-    maxTokens = 4096,
-    contextFiles,
-  } = options;
-  const temperature = config.fixedTemperature ?? requestedTemp;
+  const temperature = config.fixedTemperature ?? (options.temperature ?? 0.7);
+  const maxTokens = options.maxTokens ?? 4096;
 
   try {
-    let content: string;
-    let tokens: { input: number; output: number };
+    const first = await callProviderRaw(config, options, temperature, maxTokens);
+    const firstCost = trackTokenCost(model, first.tokens);
 
-    switch (config.provider) {
-      case 'anthropic':
-        if (!anthropicClient) {
-          throw new Error('Anthropic API key not configured');
-        }
-        ({ content, tokens } = await callAnthropic(config.modelName, systemPrompt, userPrompt, temperature, maxTokens));
-        break;
-      case 'perplexity':
-        ({ content, tokens } = await callPerplexity(
-          config.modelName,
-          systemPrompt,
-          userPrompt,
-          temperature,
-          maxTokens,
-          options.useWebSearch,
-          contextFiles
-        ));
-        break;
-      case 'xai':
-        if (!xaiClient) {
-          throw new Error('xAI API key not configured');
-        }
-        ({ content, tokens } = await callXAI(config.modelName, systemPrompt, userPrompt, temperature, maxTokens, options.useXSearch));
-        break;
-      case 'openai':
-        if (!openaiClient) {
-          throw new Error('OpenAI API key not configured');
-        }
-        ({ content, tokens } = await callOpenAI(openaiClient!, config.modelName, systemPrompt, userPrompt, temperature, maxTokens, options.useWebSearch));
-        break;
-      case 'google':
-        if (!googleClient) {
-          throw new Error('Google API key not configured');
-        }
-        ({ content, tokens } = await callGoogle(config.modelName, systemPrompt, userPrompt, temperature, maxTokens));
-        break;
-      default:
-        throw new Error(`Unsupported provider: ${config.provider}`);
+    if (!schema) {
+      return { success: true, data: first.content as T, tokens: first.tokens, cost: firstCost };
     }
 
-    const cost = trackTokenCost(model, tokens);
-
-    if (schema) {
-      const parsed = parseJsonResponse(content);
-      if (!parsed.success) {
-        return { success: false, error: parsed.error, tokens, cost };
-      }
+    // Attempt 1: parse JSON from response
+    const parsed = parseJsonResponse(first.content);
+    if (parsed.success) {
       const validated = schema.safeParse(parsed.data);
-      if (!validated.success) {
-        return {
-          success: false,
-          error: `Schema validation failed: ${validated.error.message}`,
-          tokens,
-          cost,
-        };
+      if (validated.success) {
+        return { success: true, data: validated.data, tokens: first.tokens, cost: firstCost };
       }
-      return { success: true, data: validated.data, tokens, cost };
+      return { success: false, error: `Schema validation failed: ${validated.error.message}`, tokens: first.tokens, cost: firstCost };
     }
 
-    return { success: true, data: content as T, tokens, cost };
+    // Attempt 2: retry with strict JSON enforcement prompt
+    console.log(`[multi-llm] JSON parse failed for ${model}, retrying with strict JSON prompt`);
+    const retryOptions = { ...options, systemPrompt: options.systemPrompt + JSON_RETRY_SUFFIX };
+    const retry = await callProviderRaw(config, retryOptions, temperature, maxTokens);
+    const retryCost = trackTokenCost(model, retry.tokens);
+    const totalTokens = { input: first.tokens.input + retry.tokens.input, output: first.tokens.output + retry.tokens.output };
+    const totalCost = firstCost + retryCost;
+
+    const retryParsed = parseJsonResponse(retry.content);
+    if (!retryParsed.success) {
+      return { success: false, error: retryParsed.error, tokens: totalTokens, cost: totalCost };
+    }
+    const validated = schema.safeParse(retryParsed.data);
+    if (!validated.success) {
+      return { success: false, error: `Schema validation failed: ${validated.error.message}`, tokens: totalTokens, cost: totalCost };
+    }
+    return { success: true, data: validated.data, tokens: totalTokens, cost: totalCost };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return {
-      success: false,
-      error: errorMessage,
-      tokens: { input: 0, output: 0 },
-      cost: 0,
-    };
+    return { success: false, error: errorMessage, tokens: { input: 0, output: 0 }, cost: 0 };
   }
 }
 
@@ -327,88 +323,20 @@ async function callPerplexity(
   useWebSearch?: boolean,
   contextFiles?: ContextFile[]
 ): Promise<{ content: string; tokens: { input: number; output: number } }> {
-  // Native Perplexity models (sonar, sonar-pro) use /chat/completions
-  // Third-party models (openai/gpt-5.2, etc.) use /v1/responses
-  const isNativeModel = !modelName.includes('/');
-
-  if (isNativeModel) {
-    return callPerplexityChatCompletions(modelName, systemPrompt, userPrompt, temperature, maxTokens, contextFiles);
-  }
-  return callPerplexityResponses(modelName, systemPrompt, userPrompt, temperature, maxTokens, useWebSearch, contextFiles);
-}
-
-async function callPerplexityChatCompletions(
-  modelName: string,
-  systemPrompt: string,
-  userPrompt: string,
-  temperature: number,
-  maxTokens: number,
-  contextFiles?: ContextFile[]
-): Promise<{ content: string; tokens: { input: number; output: number } }> {
-  const messages: Array<{ role: string; content: string }> = [
-    { role: 'system', content: systemPrompt },
-  ];
-
+  // All third-party models use /v1/responses
+  // Merge context files into user prompt to keep a clean system→user message pair
+  let fullUserPrompt = userPrompt;
   if (contextFiles && contextFiles.length > 0) {
-    for (const file of contextFiles) {
-      messages.push({
-        role: 'user',
-        content: `FILE: ${file.name}\nREASON: ${file.reason}\nCONTENT:\n${file.content}`,
-      });
-    }
+    const fileSection = contextFiles.map(f =>
+      `FILE: ${f.name}\nREASON: ${f.reason}\nCONTENT:\n${f.content}`
+    ).join('\n\n');
+    fullUserPrompt = `${fileSection}\n\n---\n\n${userPrompt}`;
   }
 
-  messages.push({ role: 'user', content: userPrompt });
-
-  const body: Record<string, unknown> = {
-    model: modelName,
-    messages,
-    max_tokens: maxTokens,
-    temperature,
-  };
-
-  return perplexityFetchWithRetry(
-    'https://api.perplexity.ai/chat/completions',
-    body,
-    (data) => {
-      const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
-      const content = choices?.[0]?.message?.content || '';
-      const usage = data.usage as { prompt_tokens: number; completion_tokens: number } | undefined;
-      return {
-        content,
-        tokens: {
-          input: usage?.prompt_tokens || 0,
-          output: usage?.completion_tokens || 0,
-        },
-      };
-    }
-  );
-}
-
-async function callPerplexityResponses(
-  modelName: string,
-  systemPrompt: string,
-  userPrompt: string,
-  temperature: number,
-  maxTokens: number,
-  useWebSearch?: boolean,
-  contextFiles?: ContextFile[]
-): Promise<{ content: string; tokens: { input: number; output: number } }> {
   const input: Array<Record<string, unknown>> = [
     { type: 'message', role: 'system', content: systemPrompt },
+    { type: 'message', role: 'user', content: fullUserPrompt },
   ];
-
-  if (contextFiles && contextFiles.length > 0) {
-    for (const file of contextFiles) {
-      input.push({
-        type: 'message',
-        role: 'user',
-        content: `FILE: ${file.name}\nREASON: ${file.reason}\nCONTENT:\n${file.content}`,
-      });
-    }
-  }
-
-  input.push({ type: 'message', role: 'user', content: userPrompt });
 
   const body: Record<string, unknown> = {
     model: modelName,
@@ -432,7 +360,7 @@ async function callPerplexityResponses(
           if (item.type === 'message' && item.content) {
             for (const block of item.content) {
               if (block.type === 'output_text' && block.text) {
-                content = block.text;
+                content += block.text;
               }
             }
           }
@@ -440,15 +368,14 @@ async function callPerplexityResponses(
       }
 
       if (!content) {
-        // Fallback: try extracting text from any content block
         const outputArr = data.output as Array<Record<string, unknown>> | undefined;
         if (outputArr) {
           for (const item of outputArr) {
             const blocks = item.content as Array<{ type: string; text?: string }> | undefined;
             if (blocks) {
               for (const block of blocks) {
-                if (block.text && block.text.length > content.length) {
-                  content = block.text;
+                if (block.text) {
+                  content += block.text;
                 }
               }
             }
@@ -528,11 +455,19 @@ async function perplexityFetchWithRetry(
 
       const result = extractResult(data);
 
+      console.log(`[multi-llm] Perplexity (${body.model}) usage: input=${result.tokens.input}, output=${result.tokens.output}`);
+
       if (!result.content) {
-        console.error('[multi-llm] Perplexity returned empty content. Response:', JSON.stringify(data).slice(0, 500));
+        if (attempt < maxRetries - 1) {
+          const waitTime = Math.pow(2, attempt + 1) * 1000;
+          console.warn(`[multi-llm] Perplexity (${body.model}) returned empty content, retrying in ${waitTime / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          lastError = new Error('Perplexity returned empty content');
+          continue;
+        }
+        console.error(`[multi-llm] Perplexity (${body.model}) returned empty content after ${maxRetries} attempts. Response:`, JSON.stringify(data).slice(0, 500));
       }
 
-      console.log(`[multi-llm] Perplexity (${body.model}) usage: input=${result.tokens.input}, output=${result.tokens.output}`);
       return result;
     } catch (error) {
       clearTimeout(timeout);
@@ -548,143 +483,6 @@ async function perplexityFetchWithRetry(
   }
 
   throw lastError || new Error('Perplexity API failed after retries');
-}
-
-async function callOpenAI(
-  client: OpenAI,
-  modelName: string,
-  systemPrompt: string,
-  userPrompt: string,
-  temperature: number,
-  maxTokens: number,
-  useWebSearch?: boolean
-): Promise<{ content: string; tokens: { input: number; output: number } }> {
-  // OpenAI web search via responses API with web_search_preview tool
-  if (useWebSearch) {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: modelName,
-        tools: [{ type: 'web_search_preview' }],
-        input: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_output_tokens: maxTokens,
-      }),
-    });
-
-    const data = await response.json() as Record<string, unknown>;
-
-    if (!response.ok) {
-      const errMsg = JSON.stringify(data).slice(0, 300);
-      throw new Error(`OpenAI Responses API error (${response.status}): ${errMsg}`);
-    }
-
-    // Extract text from output
-    let content = '';
-    const output = data.output as Array<{ type: string; content?: Array<{ type: string; text?: string }> }> | undefined;
-    if (output) {
-      for (const item of output) {
-        if (item.type === 'message' && item.content) {
-          for (const block of item.content) {
-            if (block.type === 'output_text' && block.text) {
-              content = block.text;
-            }
-          }
-        }
-      }
-    }
-
-    if (!content) {
-      console.error('[multi-llm] OpenAI web search returned empty content. Response keys:', Object.keys(data));
-      const outputArr = data.output as Array<Record<string, unknown>> | undefined;
-      if (outputArr) {
-        console.error('[multi-llm] Output items:', JSON.stringify(outputArr.map(item => ({ type: item.type, hasContent: !!item.content })), null, 2));
-        // Try extracting text from any output_text block regardless of parent type
-        for (const item of outputArr) {
-          const blocks = item.content as Array<{ type: string; text?: string }> | undefined;
-          if (blocks) {
-            for (const block of blocks) {
-              if (block.text && block.text.length > content.length) {
-                content = block.text;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    const usage = data.usage as { input_tokens: number; output_tokens: number } | undefined;
-    return {
-      content,
-      tokens: {
-        input: usage?.input_tokens || 0,
-        output: usage?.output_tokens || 0,
-      },
-    };
-  }
-
-  const response = await client.chat.completions.create({
-    model: modelName,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    temperature,
-    max_completion_tokens: maxTokens,
-    response_format: { type: 'json_object' },
-  });
-
-  const content = response.choices[0]?.message?.content || '';
-  const usage = response.usage;
-
-  return {
-    content,
-    tokens: {
-      input: usage?.prompt_tokens || 0,
-      output: usage?.completion_tokens || 0,
-    },
-  };
-}
-
-async function callGoogle(
-  modelName: string,
-  systemPrompt: string,
-  userPrompt: string,
-  temperature: number,
-  maxTokens: number
-): Promise<{ content: string; tokens: { input: number; output: number } }> {
-  if (!googleClient) {
-    throw new Error('Google client not initialized');
-  }
-
-  const model = googleClient.getGenerativeModel({
-    model: modelName,
-    generationConfig: {
-      temperature,
-      maxOutputTokens: maxTokens,
-      responseMimeType: 'application/json',
-    },
-    systemInstruction: systemPrompt,
-  });
-
-  const result = await model.generateContent(userPrompt);
-  const response = result.response;
-  const content = response.text();
-  const usage = response.usageMetadata;
-
-  return {
-    content,
-    tokens: {
-      input: usage?.promptTokenCount || 0,
-      output: usage?.candidatesTokenCount || 0,
-    },
-  };
 }
 
 async function callXAI(

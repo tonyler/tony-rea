@@ -5,6 +5,8 @@ import {
   refreshArticles,
   listVoiceSummaries,
   getVoiceSummary,
+  analyzeVoiceProfile,
+  getVoiceProfileMeta,
 } from '../services/voice-analyzer';
 
 const router = Router();
@@ -48,6 +50,38 @@ router.get('/:handle/all', async (req, res, next) => {
   }
 });
 
+// GET /api/voices/:handle/profile - Get voice profile
+router.get('/:handle/profile', async (req, res, next) => {
+  try {
+    const handle = req.params.handle;
+    const meta = await getVoiceProfileMeta(handle);
+
+    if (!meta) {
+      res.status(404).json({ error: `No voice profile for @${handle}. Run POST /:handle/analyze first.` });
+      return;
+    }
+
+    res.json(meta);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/voices/:handle/analyze - Analyze voice profile (without re-scraping)
+router.post('/:handle/analyze', async (req, res, next) => {
+  try {
+    const handle = req.params.handle;
+    console.log(`[voices] POST /${handle}/analyze - starting voice profile analysis`);
+
+    await analyzeVoiceProfile(handle);
+    const meta = await getVoiceProfileMeta(handle);
+
+    res.json(meta);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/voices/:handle/refresh - Scrape articles from X
 router.post('/:handle/refresh', async (req, res, next) => {
   try {
@@ -55,9 +89,20 @@ router.post('/:handle/refresh', async (req, res, next) => {
     const articles = await refreshArticles(handle);
     const summary = await getVoiceSummary(handle);
 
+    // Trigger voice profile analysis (non-fatal)
+    try {
+      await analyzeVoiceProfile(handle);
+      console.log(`[voices] Voice profile analysis complete for @${handle}`);
+    } catch (profileError) {
+      console.warn(`[voices] Voice profile analysis failed for @${handle}:`, profileError instanceof Error ? profileError.message : profileError);
+    }
+
+    // Re-fetch summary to get updated has_profile flag
+    const updatedSummary = await getVoiceSummary(handle);
+
     res.json({
-      ...summary,
-      articles: articles.slice(0, 10), // Return top 10
+      ...updatedSummary,
+      articles: articles.slice(0, 10),
     });
   } catch (error) {
     next(error);

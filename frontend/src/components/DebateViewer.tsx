@@ -33,15 +33,14 @@ function getProviderFromModel(model: string): string {
   if (model.includes('gpt')) return 'openai';
   if (model.includes('gemini')) return 'google';
   if (model.includes('grok')) return 'xai';
-  if (model.includes('sonar')) return 'perplexity';
   return 'perplexity';
 }
 
 function getCapabilityFromModel(model: string): { capability: string; capIcon: string } {
   if (model.includes('grok') && model.includes('-x')) return { capability: 'X Search', capIcon: JUDGE_ICON_X };
-  if (model.includes('sonar')) return { capability: 'Web Search', capIcon: JUDGE_ICON_SEARCH };
-  if (model.includes('gpt') || model.includes('gemini')) return { capability: 'Web Search', capIcon: JUDGE_ICON_SEARCH };
-  return { capability: 'Judge', capIcon: JUDGE_ICON_DEFAULT };
+  if (model.includes('grok')) return { capability: 'Judge', capIcon: JUDGE_ICON_DEFAULT };
+  // All Perplexity-routed models support web search
+  return { capability: 'Web Search', capIcon: JUDGE_ICON_SEARCH };
 }
 
 const FALLBACK_PALETTE: Array<{ bg: string; text: string; border: string; color: string; accent: string }> = [

@@ -1,4 +1,4 @@
-import { Message, PartialMessage } from 'discord.js';
+import { Message, PartialMessage, Embed } from 'discord.js';
 import { findConfigForChannel, isTrackedUser } from '../config';
 import { messageQueue } from '../services/queue';
 import { createLogger } from '../services/logger';
@@ -6,13 +6,27 @@ import { QueuedMessage } from '../types';
 
 const logger = createLogger('MessageHandler');
 
+function extractEmbedContent(embeds: Embed[]): string {
+  const parts: string[] = [];
+
+  for (const embed of embeds) {
+    if (embed.title) parts.push(embed.title);
+    if (embed.description) parts.push(embed.description);
+    if (embed.fields && embed.fields.length > 0) {
+      for (const field of embed.fields) {
+        parts.push(`${field.name}: ${field.value}`);
+      }
+    }
+    if (embed.footer?.text) parts.push(embed.footer.text);
+  }
+
+  return parts.join('\n');
+}
+
 /**
  * Handle incoming Discord messages
  */
 export function handleMessage(message: Message): void {
-  // Ignore bots
-  if (message.author.bot) return;
-
   // Ignore DMs
   if (!message.guild) return;
 
@@ -23,24 +37,46 @@ export function handleMessage(message: Message): void {
   // Find matching config
   const configResult = findConfigForChannel(serverId, channelId);
   if (!configResult) {
-    // Channel not configured, ignore
     return;
   }
 
   const { config, isWhitelisted } = configResult;
 
-  // Check if user is tracked
-  if (!config.trackedUsers.includes(authorId)) {
-    // User not tracked, ignore
+  // For monitored channels: skip bots and enforce tracked users
+  // For whitelisted channels: allow bots/webhooks but still require tracked users
+  if (message.author.bot && !isWhitelisted) {
+    logger.debug('Bot message skipped (monitored channel)', {
+      messageId: message.id,
+      channelId,
+      authorTag: message.author.tag,
+    });
     return;
   }
 
-  // Check minimum message length
-  const content = message.content.trim();
+  if (!isWhitelisted && !config.trackedUsers.includes(authorId)) {
+    logger.debug('Untracked user skipped (monitored channel)', {
+      messageId: message.id,
+      channelId,
+      authorId,
+      authorTag: message.author.tag,
+    });
+    return;
+  }
+
+  // Build content: text + embeds
+  let content = message.content.trim();
+  const embedContent = extractEmbedContent(message.embeds);
+  if (embedContent) {
+    content = content ? `${content}\n${embedContent}` : embedContent;
+  }
+
   if (content.length < config.minMessageLength) {
     logger.debug('Message too short', {
       messageId: message.id,
+      channelId,
       length: content.length,
+      hasEmbeds: message.embeds.length > 0,
+      isBot: message.author.bot,
       minLength: config.minMessageLength,
     });
     return;
@@ -49,7 +85,6 @@ export function handleMessage(message: Message): void {
   // Build message URL
   const messageUrl = `https://discord.com/channels/${serverId}/${channelId}/${message.id}`;
 
-  // Queue the message
   const queuedMessage: QueuedMessage = {
     id: message.id,
     projectId: config.projectId,
@@ -70,19 +105,19 @@ export function handleMessage(message: Message): void {
     projectId: config.projectId,
     authorTag: message.author.tag,
     isWhitelisted,
+    isBot: message.author.bot,
+    hasEmbeds: message.embeds.length > 0,
     channelType: isWhitelisted ? 'whitelisted' : 'monitored',
   });
 }
 
 /**
  * Handle message updates (edits)
- * For now, we just log them - could be enhanced to re-process
  */
 export function handleMessageUpdate(
   oldMessage: Message | PartialMessage,
   newMessage: Message | PartialMessage
 ): void {
-  // Only process if we have the new content
   if (!newMessage.content || !newMessage.author || newMessage.author.bot) return;
   if (!newMessage.guild) return;
 
@@ -99,6 +134,4 @@ export function handleMessageUpdate(
     projectId: configResult.config.projectId,
     authorTag: newMessage.author.tag,
   });
-
-  // TODO: Could re-process edited messages in the future
 }

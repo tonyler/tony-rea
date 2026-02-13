@@ -9,10 +9,10 @@ const DEFAULT_LLM_CONFIG: LLMConfig = {
   searchMode: 'full',
   councilMode: 'standard',
   judges: [
-    { model: 'sonar', role: 'fact-checker' },
-    { model: 'gemini-2.5-flash', role: 'originality-reviewer' },
+    { model: 'gemini-2.5-flash', role: 'fact-checker' },
+    { model: 'gpt-5-mini', role: 'originality-reviewer' },
     { model: 'grok-4-1-fast-x', role: 'slop-detector' },
-    { model: 'gemini-2.5-flash', role: 'rules-enforcer' },
+    { model: 'grok-4-1-fast', role: 'rules-enforcer' },
   ],
 };
 
@@ -25,6 +25,7 @@ export function useArticles() {
   const [llmConfig, setLLMConfig] = useState<LLMConfig>(DEFAULT_LLM_CONFIG);
 
   const [generating, setGenerating] = useState(false);
+  const [progressMessage, setProgressMessage] = useState<string | null>(null);
   const [article, setArticle] = useState<ArticleResult | null>(() => articlesStorage.getCurrentArticle());
   const [savedArticles, setSavedArticles] = useState<ArticleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -45,19 +46,30 @@ export function useArticles() {
     if (!voiceHandle || !content.trim()) return;
 
     setGenerating(true);
+    setProgressMessage(null);
     setError(null);
     setArticle(null);
 
     try {
-      const result = await articlesApi.generate(voiceHandle, content, wordCount, constraints || undefined, projectId || undefined, llmConfig);
+      const result = await articlesApi.generateStream(
+        voiceHandle,
+        content,
+        wordCount,
+        constraints || undefined,
+        projectId || undefined,
+        llmConfig,
+        (msg) => setProgressMessage(msg)
+      );
       setArticle(result);
       articlesStorage.setArticle(result);
       setContent('');
       setConstraints('');
     } catch (err) {
+      console.error('[articles] Generation failed:', err);
       setError(err instanceof Error ? err.message : 'Generation failed');
     } finally {
       setGenerating(false);
+      setProgressMessage(null);
     }
   };
 
@@ -73,6 +85,7 @@ export function useArticles() {
       articlesStorage.setArticle(result);
       setReviseInstruction('');
     } catch (err) {
+      console.error('[articles] Quick revision failed:', err);
       setError(err instanceof Error ? err.message : 'Revision failed');
     } finally {
       setRevising(false);
@@ -91,6 +104,7 @@ export function useArticles() {
       articlesStorage.setArticle(result);
       setReviseInstruction('');
     } catch (err) {
+      console.error('[articles] Re-council failed:', err);
       setError(err instanceof Error ? err.message : 'Re-council failed');
     } finally {
       setRevising(false);
@@ -138,6 +152,7 @@ export function useArticles() {
     llmConfig,
     setLLMConfig,
     generating,
+    progressMessage,
     article,
     error,
     handleGenerate,

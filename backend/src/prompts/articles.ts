@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Article } from '../services/x-scraper';
 import { DebateRound } from '../schemas/article-result';
+import type { VoiceProfile } from '../schemas/voice-profile';
 
 // Load RULES.md ethics guidelines
 const RULES_MD_PATH = path.join(__dirname, 'RULES.md');
@@ -52,25 +53,88 @@ function formatUserRequest(request: ArticleRequest): string {
   return parts.join('\n\n');
 }
 
+function formatVoiceStyleGuide(profile: VoiceProfile): string {
+  const sections: string[] = [];
+
+  sections.push(`## Voice DNA\n${profile.quick_dna}`);
+
+  sections.push(`## Tone & Formality
+- Primary tone: ${profile.tone.primary}
+- Secondary tone: ${profile.tone.secondary}
+- Formality: ${profile.tone.formality}
+- Confidence: ${profile.tone.confidence_level}
+- Humor: ${profile.tone.humor_style}`);
+
+  sections.push(`## Writing Mechanics
+- Sentence length: ${profile.mechanics.avg_sentence_length}
+- Paragraph style: ${profile.mechanics.paragraph_style}
+- Punctuation: ${profile.mechanics.punctuation_habits}
+- Formatting: ${profile.mechanics.formatting_preferences}`);
+
+  sections.push(`## Vocabulary & Phrases
+- Level: ${profile.lexicon.vocabulary_level}
+- Signature phrases: ${profile.lexicon.signature_phrases.map(p => `"${p}"`).join(', ')}
+- Emoji: ${profile.lexicon.emoji_usage}`);
+
+  sections.push(`## Rhetoric
+- Opens with: ${profile.rhetoric.opening_patterns.join('; ')}
+- Closes with: ${profile.rhetoric.closing_patterns.join('; ')}
+- Argument style: ${profile.rhetoric.argument_structure}
+- Questions: ${profile.rhetoric.use_of_questions}
+- Lists: ${profile.rhetoric.use_of_lists}`);
+
+  sections.push(`## Rhythm & Pacing
+- Pacing: ${profile.rhythm.pacing}
+- Sentence variety: ${profile.rhythm.sentence_variety}
+- Transitions: ${profile.rhythm.transition_style}`);
+
+  if (profile.anti_patterns.length > 0) {
+    sections.push(`## Anti-Patterns (NEVER do these)
+${profile.anti_patterns.map(p => `- ${p}`).join('\n')}`);
+  }
+
+  if (profile.reference_snippets.length > 0) {
+    sections.push(`## Reference Snippets
+${profile.reference_snippets.map((s, i) => `### Snippet ${i + 1}\n> ${s.text}\n_Why:_ ${s.why}`).join('\n\n')}`);
+  }
+
+  return sections.join('\n\n');
+}
+
 export function getClaudeV1Prompt(
   content: string,
   wordCount: number,
   exampleArticles: Article[],
   chunks: string[],
   constraints?: string,
-  request?: ArticleRequest
+  request?: ArticleRequest,
+  profile?: VoiceProfile
 ): { system: string; user: string } {
+  const voiceSection = profile
+    ? `# Voice Style Guide (Pre-Analyzed Profile)
+
+${formatVoiceStyleGuide(profile)}
+
+---
+
+# Voice Reference Examples
+
+These 3 examples demonstrate the voice described above:
+
+${exampleArticles.slice(0, 3).map((a, i) => `=== EXAMPLE ${i + 1} (${a.views} views, ${a.likes} likes) ===\n${a.title}\n\n${a.content}`).join('\n\n---\n\n')}`
+    : `# Voice Examples
+
+Study these examples carefully - match the tone, sentence structure, vocabulary, and overall feel:
+
+${formatExampleArticles(exampleArticles)}`;
+
   const system = `# Ethics & Guidelines
 
 ${ETHICS_GUIDELINES}
 
 ---
 
-# Voice Examples
-
-Study these examples carefully - match the tone, sentence structure, vocabulary, and overall feel:
-
-${formatExampleArticles(exampleArticles)}
+${voiceSection}
 
 ---
 
@@ -122,7 +186,23 @@ Do not include any tool calls, browsing steps, or <search> tags. Output ONLY val
 - NO clickbait patterns: "What you need to know", "The ultimate guide", "Everything about X"
 - NO parenthetical hooks: "(and why it matters)", "(and what it means)"
 - NO colon formats: "Topic: the subtitle"
-- Keep it direct and specific to the content`;
+- Keep it direct and specific to the content
+
+## BANNED PHRASES — DO NOT USE ANY OF THESE (CRITICAL)
+
+These phrases are FORBIDDEN. Do not use them. Write around them from the start.
+
+**Banned words:** "matter", "significant", "significantly", "compelling", "delve", "realm"
+**Banned symbol:** em dash "—" (use commas, periods, or parentheses)
+
+**AI slop — never use:**
+${AI_SLOP_PATTERNS.map(p => `"${p}"`).join(', ')}
+
+**Buzzwords — never use:**
+${BUZZWORD_LIST.map(b => `"${b}"`).join(', ')}
+
+**Title slop — never use:**
+${AI_TITLE_SLOP.map(t => `"${t}"`).join(', ')}`;
 
   let userPrompt: string;
 
@@ -378,7 +458,17 @@ You are the quality gatekeeper. Your job is to FAIL mediocre content.
 If you're unsure between two scores, PICK THE LOWER ONE.
 
 If you find 3+ slop patterns, ai_slop CANNOT be higher than 5.
-If title is in Title Case or has clickbait, ai_slop CANNOT be higher than 6.`;
+
+---
+
+# OUTPUT BREVITY (CRITICAL)
+
+Keep your response COMPACT:
+- "reasoning": MAX 2-3 sentences. No essays.
+- "flagged_phrases": MAX 6 entries. One-line fixes only.
+- "top_issues": MAX 4 entries. One-line fixes only.
+- "fact_check_report.claims": Include ONLY claims with mismatches or notable findings. Skip obvious matches.
+- Do NOT pad the response. Shorter = better. Aim for under 3000 tokens total.`;
 
   const kbSection = kbKnowledge ? `
 
@@ -704,12 +794,17 @@ export function getClaudeFinalPrompt(
   originalArticle: string,
   r2: DebateRound,
   exampleArticles: Article[],
-  flaggedPhrases?: FlaggedPhraseWithJudge[]
+  flaggedPhrases?: FlaggedPhraseWithJudge[],
+  profile?: VoiceProfile
 ): { system: string; user: string } {
-  const voiceExamples = exampleArticles
-    .slice(0, 3)
-    .map((a, i) => `=== VOICE EXAMPLE ${i + 1} ===\n${a.title}\n\n${a.content.slice(0, 1800)}...`)
-    .join('\n\n---\n\n');
+  const voiceContext = profile
+    ? `## Voice Style Guide\n${formatVoiceStyleGuide(profile)}`
+    : exampleArticles.length > 0
+      ? `Reference these examples for the target voice:\n${exampleArticles
+          .slice(0, 3)
+          .map((a, i) => `=== VOICE EXAMPLE ${i + 1} ===\n${a.title}\n\n${a.content.slice(0, 1800)}...`)
+          .join('\n\n---\n\n')}`
+      : '';
 
   const system = `You are revising an article based on judge feedback.
 
@@ -726,7 +821,7 @@ export function getClaudeFinalPrompt(
 - Do NOT sanitize or flatten the voice; keep punchy cadence and direct address where it exists
 - Preserve rhetorical devices that are natural to the voice (rhetorical questions, short punchy lines), unless they violate explicit rules
 
-${exampleArticles.length > 0 ? `Reference these examples for the target voice:\n${voiceExamples}` : ''}`;
+${voiceContext}`;
 
   const flaggedSection = flaggedPhrases && flaggedPhrases.length > 0
     ? `\n\n## Flagged Phrases to Fix
@@ -756,14 +851,19 @@ Return JSON:
 export function getQuickRevisionPrompt(
   article: string,
   instruction: string,
-  r2: DebateRound | null
+  r2: DebateRound | null,
+  profile?: VoiceProfile
 ): { system: string; user: string } {
+  const voiceGuide = profile
+    ? `\n\n## Voice Style Guide\n${formatVoiceStyleGuide(profile)}`
+    : '';
+
   const system = `You are making a quick edit to an article based on user feedback.
 
 ## Guidelines
 - Preserve the voice, structure, and quality while applying the requested change
 - **Accuracy First** - Do not introduce false claims even if the user asks
-- If the request would violate ethics (financial advice, false claims), note it in the output`;
+- If the request would violate ethics (financial advice, false claims), note it in the output${voiceGuide}`;
 
   const user = `Article:
 ${article}

@@ -54,40 +54,43 @@ interface CouncilResult {
   warnings: string[];
 }
 
+export type ProgressCallback = (message: string) => void;
+
 export interface CouncilOptions {
   projectId?: string;
   judges?: JudgeConfig[];
   searchMode?: SearchMode;
   judgeConfigWarnings?: string[];
+  onProgress?: ProgressCallback;
 }
 
 export function getDefaultJudges(searchMode: SearchMode = 'full'): JudgeConfig[] {
   return [
     {
-      model: 'gemini-2.5-flash',  // Google Direct - fast, cheap fact-checking via KB
+      model: 'gpt-5-mini',  // Via Perplexity — web search fact-checking
       role: 'fact-checker',
-      label: 'gemini-facts',
-      useWebSearch: false,
+      label: 'gpt-facts',
+      useWebSearch: searchMode === 'full' || searchMode === 'web-only',
       useXSearch: false,
     },
     {
-      model: 'gemini-2.5-flash',  // Google Direct - fast, cheap originality analysis
+      model: 'gemini-2.5-flash',  // Via Perplexity — originality analysis (no search)
       role: 'originality-reviewer',
       label: 'gemini-originality',
       useWebSearch: false,
       useXSearch: false,
     },
     {
-      model: 'grok-4-1-fast-x',  // xAI Direct - X search for slop/trends detection
+      model: 'grok-4-1-fast-x',  // xAI Direct — X search for slop/trends detection
       role: 'slop-detector',
       label: 'grok-slop',
       useWebSearch: false,
       useXSearch: searchMode === 'full' || searchMode === 'x-only',
     },
     {
-      model: 'gemini-2.5-flash',  // Google Direct - consistent rules enforcement
+      model: 'grok-4-1-fast',  // Via Perplexity — cheap rules enforcement
       role: 'rules-enforcer',
-      label: 'gemini-rules',
+      label: 'grok-rules',
       useWebSearch: false,
       useXSearch: false,
     },
@@ -150,7 +153,7 @@ export async function runCouncil(
   budget: BudgetTracker,
   options: CouncilOptions = {}
 ): Promise<CouncilResult> {
-  const { projectId, searchMode = 'full', judgeConfigWarnings } = options;
+  const { projectId, searchMode = 'full', judgeConfigWarnings, onProgress } = options;
   const warnings: string[] = [...(judgeConfigWarnings ?? [])];
   const judges = options.judges ?? getDefaultJudges(searchMode);
   const minJudgesRequired = Math.min(judges.length, 2);
@@ -158,7 +161,7 @@ export async function runCouncil(
   console.log(`[council] Starting council evaluation with ${judges.length} judges...${projectId ? ' (per-judge KB retrieval)' : ''}`);
 
   const r1Start = Date.now();
-  const r1Result = await runJudgeRound(article, budget, judges, projectId);
+  const r1Result = await runJudgeRound(article, budget, judges, projectId, onProgress);
   console.log(`[council] Completed in ${((Date.now() - r1Start) / 1000).toFixed(1)}s`);
 
   if (!r1Result.success && r1Result.judgeCount < minJudgesRequired) {
@@ -256,38 +259,68 @@ const JudgeResponseSchema = z.object({
   fact_check_report: FactCheckReportSchema,
 });
 
+const MODEL_LABELS: Record<string, string> = {
+  'claude-sonnet-4-5': 'Claude Sonnet 4.5',
+  'claude-haiku-4-5': 'Claude Haiku 4.5',
+  'claude-opus-4-5': 'Claude Opus 4.5',
+  'gpt-5.2': 'GPT-5.2',
+  'gpt-5.1': 'GPT-5.1',
+  'gpt-5-mini': 'GPT-5 Mini',
+  'gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'gemini-3-flash': 'Gemini 3 Flash',
+  'gemini-3-pro': 'Gemini 3 Pro',
+  'grok-4-1-fast': 'Grok 4.1',
+  'grok-4-1-fast-x': 'Grok 4.1',
+};
+
+const ROLE_ACTIONS: Record<string, string> = {
+  'fact-checker': 'fact-checking',
+  'slop-detector': 'scanning for AI slop',
+  'originality-reviewer': 'reviewing originality',
+  'rules-enforcer': 'enforcing editorial rules',
+};
+
+function judgeProgressMessage(judge: JudgeConfig): string {
+  const name = MODEL_LABELS[judge.model] || judge.model;
+  const action = ROLE_ACTIONS[judge.role] || judge.role;
+  const suffix = judge.useXSearch ? ' via X' : judge.useWebSearch ? ' with web search' : '';
+  return `${name} is ${action}${suffix}`;
+}
+
 async function runJudgeRound(
   article: string,
   budget: BudgetTracker,
   judges: JudgeConfig[],
-  projectId?: string
+  projectId?: string,
+  onProgress?: ProgressCallback
 ): Promise<RoundResult> {
   const kbIndex = projectId ? await readKBIndex(projectId) : '';
-  const judgePromises = judges.map((judge) => {
-    return judgeArticle(judge, article, budget, projectId, kbIndex);
-  });
 
-  const results = await Promise.allSettled(judgePromises);
+  // Sort judges so fact-checkers run last (they use web search and take longest)
+  const sorted = [...judges].sort((a, b) => {
+    if (a.role === 'fact-checker' && b.role !== 'fact-checker') return 1;
+    if (a.role !== 'fact-checker' && b.role === 'fact-checker') return -1;
+    return 0;
+  });
 
   const opinions: Record<string, JudgeOpinion> = {};
   let currentBudget = budget;
   const minRequired = Math.min(judges.length, 2);
 
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    const judgeLabel = judges[i].label;
-
-    if (result.status === 'fulfilled' && result.value.success) {
-      opinions[judgeLabel] = result.value.opinion;
-      currentBudget = recordCall(
-        currentBudget,
-        judges[i].model,
-        result.value.tokens,
-        result.value.cost
-      );
-    } else {
-      const error = result.status === 'rejected' ? result.reason : result.value.error;
-      console.error(`Judge ${judgeLabel} failed:`, error);
+  // Run judges sequentially to avoid Perplexity 429 rate limits
+  for (const judge of sorted) {
+    onProgress?.(judgeProgressMessage(judge));
+    try {
+      const result = await judgeArticle(judge, article, currentBudget, projectId, kbIndex);
+      if (result.success) {
+        opinions[judge.label] = result.opinion;
+        currentBudget = recordCall(currentBudget, judge.model, result.tokens, result.cost);
+      } else {
+        console.error(`Judge ${judge.label} failed:`, result.error);
+      }
+    } catch (error) {
+      console.error(`Judge ${judge.label} failed:`, error);
     }
   }
 
