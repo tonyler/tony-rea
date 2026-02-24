@@ -7,8 +7,9 @@ export type ModelProvider = 'anthropic' | 'perplexity' | 'xai';
 
 export type ModelId =
   // Anthropic Direct (prompt caching for draft/revision)
-  | 'claude-sonnet-4-5'
+  | 'claude-sonnet-4-6'
   // Via Perplexity v1/responses — Anthropic
+  | 'claude-opus-4-6'
   | 'claude-haiku-4-5'
   | 'claude-opus-4-5'
   // Via Perplexity v1/responses — OpenAI
@@ -16,6 +17,7 @@ export type ModelId =
   | 'gpt-5.1'
   | 'gpt-5-mini'
   // Via Perplexity v1/responses — Google
+  | 'gemini-3.1-pro'
   | 'gemini-2.5-flash'
   | 'gemini-2.5-pro'
   | 'gemini-3-flash'
@@ -40,13 +42,19 @@ interface ModelConfig {
 
 const MODELS: Record<ModelId, ModelConfig> = {
   // Anthropic Direct — draft/revision with prompt caching
-  'claude-sonnet-4-5': {
+  'claude-sonnet-4-6': {
     provider: 'anthropic',
-    modelName: 'claude-sonnet-4-5-20250929',
+    modelName: 'claude-sonnet-4-6',
     pricing: { input: 3, output: 15 },
     capabilities: { webSearch: false, xSearch: false },
   },
   // Via Perplexity v1/responses — Anthropic
+  'claude-opus-4-6': {
+    provider: 'perplexity',
+    modelName: 'anthropic/claude-opus-4-6',
+    pricing: { input: 5, output: 25 },
+    capabilities: { webSearch: true, xSearch: false },
+  },
   'claude-haiku-4-5': {
     provider: 'perplexity',
     modelName: 'anthropic/claude-haiku-4-5',
@@ -79,6 +87,12 @@ const MODELS: Record<ModelId, ModelConfig> = {
     capabilities: { webSearch: true, xSearch: false },
   },
   // Via Perplexity v1/responses — Google
+  'gemini-3.1-pro': {
+    provider: 'perplexity',
+    modelName: 'google/gemini-3.1-pro-preview',
+    pricing: { input: 2, output: 12 },
+    capabilities: { webSearch: true, xSearch: false },
+  },
   'gemini-2.5-flash': {
     provider: 'perplexity',
     modelName: 'google/gemini-2.5-flash',
@@ -142,6 +156,7 @@ export interface MultiLLMOptions {
   useWebSearch?: boolean;
   useXSearch?: boolean;  // Enable X/Twitter search (xAI only)
   contextFiles?: ContextFile[];
+  timeoutMs?: number;    // Overall timeout for entire callMultiLLM flow
 }
 
 export interface MultiLLMResult<T> {
@@ -216,7 +231,7 @@ export async function callMultiLLM<T>(
   const temperature = config.fixedTemperature ?? (options.temperature ?? 0.7);
   const maxTokens = options.maxTokens ?? 4096;
 
-  try {
+  const innerCall = async (): Promise<MultiLLMResult<T>> => {
     const first = await callProviderRaw(config, options, temperature, maxTokens);
     const firstCost = trackTokenCost(model, first.tokens);
 
@@ -251,6 +266,24 @@ export async function callMultiLLM<T>(
       return { success: false, error: `Schema validation failed: ${validated.error.message}`, tokens: totalTokens, cost: totalCost };
     }
     return { success: true, data: validated.data, tokens: totalTokens, cost: totalCost };
+  };
+
+  try {
+    if (options.timeoutMs) {
+      let timeoutId: ReturnType<typeof setTimeout>;
+      const timeoutPromise = new Promise<MultiLLMResult<T>>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`callMultiLLM timeout (${options.timeoutMs! / 1000}s) for ${model}`)), options.timeoutMs);
+      });
+      try {
+        const result = await Promise.race([innerCall(), timeoutPromise]);
+        clearTimeout(timeoutId!);
+        return result;
+      } catch (error) {
+        clearTimeout(timeoutId!);
+        throw error;
+      }
+    }
+    return await innerCall();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage, tokens: { input: 0, output: 0 }, cost: 0 };
@@ -352,6 +385,7 @@ async function callPerplexity(
   return perplexityFetchWithRetry(
     'https://api.perplexity.ai/v1/responses',
     body,
+    useWebSearch ? 180_000 : 120_000,
     (data) => {
       let content = '';
       const output = data.output as Array<{ type: string; content?: Array<{ type: string; text?: string }> }> | undefined;
@@ -398,6 +432,7 @@ async function callPerplexity(
 async function perplexityFetchWithRetry(
   url: string,
   body: Record<string, unknown>,
+  timeoutMs: number,
   extractResult: (data: Record<string, unknown>) => { content: string; tokens: { input: number; output: number } }
 ): Promise<{ content: string; tokens: { input: number; output: number } }> {
   const maxRetries = 3;
@@ -405,7 +440,7 @@ async function perplexityFetchWithRetry(
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url, {
@@ -472,9 +507,9 @@ async function perplexityFetchWithRetry(
     } catch (error) {
       clearTimeout(timeout);
       if (error instanceof Error && error.name === 'AbortError') {
-        lastError = new Error('Perplexity API timeout (120s)');
+        lastError = new Error(`Perplexity API timeout (${timeoutMs / 1000}s)`);
         if (attempt < maxRetries - 1) {
-          console.log(`[multi-llm] Perplexity timeout, retrying (attempt ${attempt + 1}/${maxRetries})`);
+          console.log(`[multi-llm] Perplexity timeout (${timeoutMs / 1000}s), retrying (attempt ${attempt + 1}/${maxRetries})`);
           continue;
         }
       }
@@ -593,11 +628,18 @@ function parseJsonResponse(content: string): { success: true; data: unknown } | 
   try {
     let jsonStr = content.trim();
 
-    // First, try to extract JSON from within code blocks
-    // Match ```json ... ``` or ``` ... ``` patterns
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (codeBlockMatch && codeBlockMatch[1]) {
-      jsonStr = codeBlockMatch[1].trim();
+    // Fast path: try direct parse before any stripping
+    try {
+      return { success: true, data: JSON.parse(jsonStr) };
+    } catch {
+      // Continue to fence stripping
+    }
+
+    // Strip code fences: "text\n```json\n{...}\n```\nmore text" → "{...}"
+    // Use a single capture group to extract content between fences
+    const fenceMatch = jsonStr.match(/```(?:json|JSON)?\s*\n([\s\S]*?)\n\s*```/);
+    if (fenceMatch?.[1]) {
+      jsonStr = fenceMatch[1].trim();
     }
 
     // Extract JSON object between first { and last }
@@ -610,14 +652,14 @@ function parseJsonResponse(content: string): { success: true; data: unknown } | 
     // Remove trailing commas before } or ]
     jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
 
-    // First attempt: direct parse
+    // Try parse after fence stripping and cleanup
     try {
       return { success: true, data: JSON.parse(jsonStr) };
     } catch {
       // Fall through to repair
     }
 
-    // Second attempt: repair truncated JSON by closing open structures
+    // Repair truncated JSON by closing open structures
     let repaired = jsonStr;
     let openBraces = 0;
     let openBrackets = 0;

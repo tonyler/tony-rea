@@ -67,30 +67,23 @@ export interface CouncilOptions {
 export function getDefaultJudges(searchMode: SearchMode = 'full'): JudgeConfig[] {
   return [
     {
-      model: 'gpt-5-mini',  // Via Perplexity — web search fact-checking
+      model: 'grok-4-1-fast-x',  // xAI Direct — X search for data verification
       role: 'fact-checker',
-      label: 'gpt-facts',
-      useWebSearch: searchMode === 'full' || searchMode === 'web-only',
-      useXSearch: false,
-    },
-    {
-      model: 'gemini-2.5-flash',  // Via Perplexity — originality analysis (no search)
-      role: 'originality-reviewer',
-      label: 'gemini-originality',
-      useWebSearch: false,
-      useXSearch: false,
-    },
-    {
-      model: 'grok-4-1-fast-x',  // xAI Direct — X search for slop/trends detection
-      role: 'slop-detector',
-      label: 'grok-slop',
+      label: 'grok-facts',
       useWebSearch: false,
       useXSearch: searchMode === 'full' || searchMode === 'x-only',
     },
     {
-      model: 'grok-4-1-fast',  // Via Perplexity — cheap rules enforcement
-      role: 'rules-enforcer',
-      label: 'grok-rules',
+      model: 'gpt-5.1',  // Via Perplexity — slop/AI pattern detection
+      role: 'slop-detector',
+      label: 'gpt-slop',
+      useWebSearch: false,
+      useXSearch: false,
+    },
+    {
+      model: 'gpt-5-mini',  // Via Perplexity — originality analysis
+      role: 'originality-reviewer',
+      label: 'gpt-originality',
       useWebSearch: false,
       useXSearch: false,
     },
@@ -260,12 +253,14 @@ const JudgeResponseSchema = z.object({
 });
 
 const MODEL_LABELS: Record<string, string> = {
-  'claude-sonnet-4-5': 'Claude Sonnet 4.5',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
   'claude-haiku-4-5': 'Claude Haiku 4.5',
+  'claude-opus-4-6': 'Claude Opus 4.6',
   'claude-opus-4-5': 'Claude Opus 4.5',
   'gpt-5.2': 'GPT-5.2',
   'gpt-5.1': 'GPT-5.1',
   'gpt-5-mini': 'GPT-5 Mini',
+  'gemini-3.1-pro': 'Gemini 3.1 Pro',
   'gemini-2.5-flash': 'Gemini 2.5 Flash',
   'gemini-2.5-pro': 'Gemini 2.5 Pro',
   'gemini-3-flash': 'Gemini 3 Flash',
@@ -297,30 +292,73 @@ async function runJudgeRound(
 ): Promise<RoundResult> {
   const kbIndex = projectId ? await readKBIndex(projectId) : '';
 
-  // Sort judges so fact-checkers run last (they use web search and take longest)
-  const sorted = [...judges].sort((a, b) => {
-    if (a.role === 'fact-checker' && b.role !== 'fact-checker') return 1;
-    if (a.role !== 'fact-checker' && b.role === 'fact-checker') return -1;
-    return 0;
+  // Split judges into groups: non-Perplexity (xAI) can run in parallel with Perplexity judges
+  // Perplexity judges run sequentially to avoid 429 rate limits
+  const perplexityJudges = judges.filter(j => {
+    const cfg = getModelConfig(j.model);
+    return cfg?.provider === 'perplexity';
+  });
+  const nonPerplexityJudges = judges.filter(j => {
+    const cfg = getModelConfig(j.model);
+    return cfg?.provider !== 'perplexity';
   });
 
   const opinions: Record<string, JudgeOpinion> = {};
   let currentBudget = budget;
   const minRequired = Math.min(judges.length, 2);
 
-  // Run judges sequentially to avoid Perplexity 429 rate limits
-  for (const judge of sorted) {
-    onProgress?.(judgeProgressMessage(judge));
+  const JUDGE_TIMEOUT_WEB_SEARCH = 300_000; // 5 min for web/X search judges
+  const JUDGE_TIMEOUT_DEFAULT = 180_000;     // 3 min for non-search judges
+
+  type JudgeOutcome = { judge: JudgeConfig; result: JudgeResult | null };
+
+  async function runJudgeWithTimeout(judge: JudgeConfig): Promise<JudgeOutcome> {
+    const usesSearch = judge.useWebSearch || judge.useXSearch;
+    const timeoutMs = usesSearch ? JUDGE_TIMEOUT_WEB_SEARCH : JUDGE_TIMEOUT_DEFAULT;
+
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const judgePromise = judgeArticle(judge, article, currentBudget, projectId, kbIndex);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`Judge ${judge.label} timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+    });
+
     try {
-      const result = await judgeArticle(judge, article, currentBudget, projectId, kbIndex);
-      if (result.success) {
-        opinions[judge.label] = result.opinion;
-        currentBudget = recordCall(currentBudget, judge.model, result.tokens, result.cost);
-      } else {
-        console.error(`Judge ${judge.label} failed:`, result.error);
-      }
+      const result = await Promise.race([judgePromise, timeoutPromise]);
+      clearTimeout(timeoutId!);
+      return { judge, result };
     } catch (error) {
-      console.error(`Judge ${judge.label} failed:`, error);
+      clearTimeout(timeoutId!);
+      const msg = error instanceof Error ? error.message : 'unknown error';
+      console.error(`[council] Judge ${judge.label} timeout/error: ${msg}`);
+      return { judge, result: null };
+    }
+  }
+
+  // Run non-Perplexity judges in parallel with sequential Perplexity judges
+  // Collect all results first, then apply sequentially to avoid race conditions on shared state
+  const perplexityPromise = (async (): Promise<JudgeOutcome[]> => {
+    const results: JudgeOutcome[] = [];
+    for (const judge of perplexityJudges) {
+      onProgress?.(judgeProgressMessage(judge));
+      results.push(await runJudgeWithTimeout(judge));
+    }
+    return results;
+  })();
+
+  const nonPerplexityPromises = nonPerplexityJudges.map(async (judge): Promise<JudgeOutcome> => {
+    onProgress?.(judgeProgressMessage(judge));
+    return runJudgeWithTimeout(judge);
+  });
+
+  const [perplexityResults, ...nonPerplexityResults] = await Promise.all([perplexityPromise, ...nonPerplexityPromises]);
+
+  // Apply results sequentially — no race condition on opinions/budget
+  for (const { judge, result } of [...perplexityResults, ...nonPerplexityResults]) {
+    if (result?.success) {
+      opinions[judge.label] = result.opinion;
+      currentBudget = recordCall(currentBudget, judge.model, result.tokens, result.cost);
+    } else if (result) {
+      console.error(`[council] Judge ${judge.label} failed: ${result.error}`);
     }
   }
 

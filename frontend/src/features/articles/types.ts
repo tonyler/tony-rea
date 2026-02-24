@@ -128,12 +128,14 @@ export interface ArticleResult {
 }
 
 export type ModelId =
-  | 'claude-sonnet-4-5'  // Anthropic Direct (prompt caching)
+  | 'claude-sonnet-4-6'  // Anthropic Direct (prompt caching)
+  | 'claude-opus-4-6'    // via Perplexity
   | 'claude-haiku-4-5'   // via Perplexity
   | 'claude-opus-4-5'    // via Perplexity
   | 'gpt-5.2'            // via Perplexity
   | 'gpt-5.1'            // via Perplexity
   | 'gpt-5-mini'         // via Perplexity
+  | 'gemini-3.1-pro'     // via Perplexity
   | 'gemini-2.5-flash'   // via Perplexity
   | 'gemini-2.5-pro'     // via Perplexity
   | 'gemini-3-flash'     // via Perplexity

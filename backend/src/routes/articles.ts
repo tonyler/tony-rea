@@ -23,12 +23,14 @@ import { retrieveRelevantEntries, formatRetrievedKnowledge } from '../services/r
 const router = Router();
 
 const MODEL_LABELS: Record<string, string> = {
-  'claude-sonnet-4-5': 'Claude Sonnet 4.5',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
   'claude-haiku-4-5': 'Claude Haiku 4.5',
+  'claude-opus-4-6': 'Claude Opus 4.6',
   'claude-opus-4-5': 'Claude Opus 4.5',
   'gpt-5.2': 'GPT-5.2',
   'gpt-5.1': 'GPT-5.1',
   'gpt-5-mini': 'GPT-5 Mini',
+  'gemini-3.1-pro': 'Gemini 3.1 Pro',
   'gemini-2.5-flash': 'Gemini 2.5 Flash',
   'gemini-2.5-pro': 'Gemini 2.5 Pro',
   'gemini-3-flash': 'Gemini 3 Flash',
@@ -55,12 +57,14 @@ const ArticleRequestSchema = z.object({
 });
 
 const ModelIdEnum = z.enum([
-  'claude-sonnet-4-5',
+  'claude-sonnet-4-6',
+  'claude-opus-4-6',
   'claude-haiku-4-5',
   'claude-opus-4-5',
   'gpt-5.2',
   'gpt-5.1',
   'gpt-5-mini',
+  'gemini-3.1-pro',
   'gemini-2.5-flash',
   'gemini-2.5-pro',
   'gemini-3-flash',
@@ -84,8 +88,8 @@ const GenerateRequestSchema = z.object({
   projectId: z.string().optional(),
   // LLM configuration
   searchMode: SearchModeEnum.default('full'),
-  draftModel: ModelIdEnum.default('claude-sonnet-4-5'),
-  revisionModel: ModelIdEnum.default('claude-sonnet-4-5'),
+  draftModel: ModelIdEnum.default('claude-sonnet-4-6'),
+  revisionModel: ModelIdEnum.default('claude-sonnet-4-6'),
   judges: z.array(z.object({
     model: ModelIdEnum,
     role: JudgeRoleEnum,
@@ -445,7 +449,7 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
         content: z.string(),
       });
 
-      const result = await callMultiLLM('claude-sonnet-4-5', {
+      const result = await callMultiLLM('claude-sonnet-4-6', {
         systemPrompt: quickPrompt.system,
         userPrompt: quickPrompt.user,
         temperature: 0.5,
@@ -457,7 +461,7 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
         return;
       }
 
-      budget = recordCall(budget, 'claude-sonnet-4-5', result.tokens, result.cost);
+      budget = recordCall(budget, 'claude-sonnet-4-6', result.tokens, result.cost);
 
       const quickContentChanged = result.data.content !== existingArticle.content || result.data.title !== existingArticle.title;
 
@@ -493,7 +497,7 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
         content: z.string(),
       });
 
-      const claudeResult = await callMultiLLM('claude-sonnet-4-5', {
+      const claudeResult = await callMultiLLM('claude-sonnet-4-6', {
         systemPrompt: claudePrompt.system,
         userPrompt: claudePrompt.user,
         temperature: 0.7,
@@ -505,7 +509,7 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
         return;
       }
 
-      budget = recordCall(budget, 'claude-sonnet-4-5', claudeResult.tokens, claudeResult.cost);
+      budget = recordCall(budget, 'claude-sonnet-4-6', claudeResult.tokens, claudeResult.cost);
 
       const councilResult = await runCouncil(claudeResult.data.content, budget, {
         projectId: existingArticle.projectId,
@@ -524,7 +528,7 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
           flaggedPhrases
         );
 
-        const finalResult = await callMultiLLM('claude-sonnet-4-5', {
+        const finalResult = await callMultiLLM('claude-sonnet-4-6', {
           systemPrompt: finalPrompt.system,
           userPrompt: finalPrompt.user,
           temperature: 0.5,
@@ -532,7 +536,7 @@ router.post('/:articleId/revise', async (req: Request, res: Response, next: Next
         }, ArticleContentSchema);
 
         if (finalResult.success && finalResult.data) {
-          budget = recordCall(budget, 'claude-sonnet-4-5', finalResult.tokens, finalResult.cost);
+          budget = recordCall(budget, 'claude-sonnet-4-6', finalResult.tokens, finalResult.cost);
           finalArticle = finalResult.data;
         }
       }
