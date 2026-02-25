@@ -175,11 +175,13 @@ router.post('/grammar', async (req, res, next) => {
       throw createError('text is required', 400);
     }
 
-    // Call LLM
+    // Call LLM — use gpt-4o via OpenAI direct for grammar correction
     const result = await callLLM(
       {
         userPrompt: text,
         systemPrompt: getGrammarPrompt(),
+        model: 'gpt-5-mini',
+        temperature: 1,
         maxRetries: 1,
       },
       GrammarResponseSchema
