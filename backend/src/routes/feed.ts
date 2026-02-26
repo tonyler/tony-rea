@@ -132,6 +132,8 @@ router.post('/ingest', async (req, res, next) => {
       {
         userPrompt,
         systemPrompt: getFeedIngestPrompt(),
+        model: 'gpt-5-mini',
+        temperature: 1,
         maxRetries: 1,
         maxTokens: 16384,
       },
@@ -169,7 +171,7 @@ router.post('/ingest', async (req, res, next) => {
         if (normPrompt) {
           try {
             const normResult = await callLLM(
-              { userPrompt: normPrompt.user, systemPrompt: normPrompt.system, maxRetries: 0, maxTokens: 1024 },
+              { userPrompt: normPrompt.user, systemPrompt: normPrompt.system, model: 'gpt-5-mini', temperature: 1, maxRetries: 0, maxTokens: 1024 },
               TagNormalizationSchema
             );
             if (normResult.success && normResult.data.mappings) {
@@ -276,6 +278,8 @@ router.post('/update', async (req, res, next) => {
       {
         userPrompt,
         systemPrompt: getFeedUpdatePrompt(currentEntriesText),
+        model: 'gpt-5-mini',
+        temperature: 1,
         maxRetries: 1,
       },
       KBPatchPlanSchema
@@ -531,6 +535,8 @@ router.post('/mcp/ingest', async (req, res, next) => {
             {
               userPrompt,
               systemPrompt: getFeedIngestPrompt(),
+              model: 'gpt-5-mini',
+              temperature: 1,
               maxRetries: 1,
               maxTokens: 16384,
             },

@@ -35,6 +35,8 @@ router.post('/generate', async (req, res, next) => {
       {
         userPrompt,
         systemPrompt: getThreadsPrompt(postCount),
+        model: 'gpt-5-mini',
+        temperature: 1,
         maxRetries: 1,
       },
       ThreadResultSchema
@@ -56,6 +58,8 @@ router.post('/generate', async (req, res, next) => {
           {
             userPrompt: retryPrompt,
             systemPrompt: getThreadsPrompt(postCount),
+            model: 'gpt-5-mini',
+            temperature: 1,
             maxRetries: 0, // No more retries
           },
           ThreadResultSchema

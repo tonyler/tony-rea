@@ -38,8 +38,9 @@ export async function retrieveRelevantEntries(
     {
       userPrompt: `User Question: ${query}`,
       systemPrompt: getRetrievalPrompt(kbIndex),
+      model: 'gpt-5-mini',
+      temperature: 1,
       maxRetries: 1,
-      mode: 'retrieval',
     },
     RetrievalResponseSchema
   );

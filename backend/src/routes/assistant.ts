@@ -76,8 +76,9 @@ router.post('/mod', async (req, res, next) => {
       {
         userPrompt,
         systemPrompt: getModPrompt(knowledge),
+        model: 'gpt-5.1',
+        temperature: 1,
         maxRetries: 1,
-        mode: 'mod',
       },
       AssistantResponseSchema
     );
@@ -150,8 +151,9 @@ router.post('/education', async (req, res, next) => {
       {
         userPrompt,
         systemPrompt: getEducationPrompt(knowledge),
+        model: 'gpt-5.1',
+        temperature: 1,
         maxRetries: 1,
-        mode: 'education',
       },
       EducationResponseSchema
     );

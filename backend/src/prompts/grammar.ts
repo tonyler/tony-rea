@@ -13,15 +13,16 @@ export function getGrammarPrompt(): string {
 Fix grammar, spelling, punctuation, and basic style issues in the provided text.
 
 # Correction Rules
-- Fix obvious errors only - don't rewrite or rephrase
-- Preserve the original meaning, tone, and voice
+- Fix all grammatical errors including wrong word choices — replacing an incorrect word with the correct one is a fix, not a rewrite
+- Keep the same sentence structure; don't restructure sentences
 - Keep the same level of formality (casual stays casual, formal stays formal)
-- Maintain intentional stylistic choices (fragments for emphasis, etc.)
+- Maintain intentional stylistic choices (fragments for emphasis, slang, etc.)
 - Don't add or remove content beyond necessary corrections
 
 # What to Fix
-- Spelling mistakes
+- Spelling mistakes (engalnd → England)
 - Grammar errors (subject-verb agreement, tense consistency, etc.)
+- Wrong word used where a clearly correct alternative exists (e.g. "I love it very best" → "I love it very much", "I seen him" → "I saw him", "She go to school" → "She goes to school")
 - Punctuation issues
 - Common typos (their/they're/there, your/you're, etc.)
 - Capitalization errors
@@ -76,6 +77,18 @@ Input: "We recieved you're email and will response shortly. The team are working
     "you're → your (contraction → possessive)",
     "response → respond (noun → verb)",
     "are → is (subject-verb agreement with collective noun)"
+  ]
+}
+
+Example 4 - Wrong word usage (non-native patterns):
+Input: "i love engalnd very best"
+
+{
+  "corrected_text": "I love England very much.",
+  "changes_made": [
+    "i → I (capitalization)",
+    "engalnd → England (spelling)",
+    "very best → very much (incorrect word usage)"
   ]
 }`;
 }
