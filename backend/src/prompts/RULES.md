@@ -98,6 +98,8 @@ When including specific numbers, **search the internet for current data**:
 - "Guaranteed returns..."
 - "The team promised..."  (unless there's a real quote)
 - "Everyone knows that..."
+- "Why this matters" (lazy section header — explain the relevance inline instead)
+- "Here's the..." (weak filler opener — start with the actual point)
 - Outdated prices or metrics without verification
 
 ---
@@ -182,7 +184,10 @@ Never use these in generated content:
 - "compelling"
 - "delve"
 - "realm"
+- "Why this matters" (as a heading or phrase)
+- "Here's the..." (as a sentence opener)
 - "—" (em dashes — use commas, periods, or parentheses instead)
+- 3-word sentences used as standalone punchy lines (e.g. "This is big." "That changed everything." — sounds like AI filler, avoid)
 
 ---
 

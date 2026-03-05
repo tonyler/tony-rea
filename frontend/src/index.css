@@ -19,16 +19,6 @@
     line-height: 1.6;
   }
 
-  /* Subtle noise texture overlay */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-    opacity: 0.03;
-    pointer-events: none;
-    z-index: 9999;
-  }
 
   ::selection {
     @apply bg-amber-300/30 text-cream-50;
@@ -131,11 +121,10 @@
      CARDS
      ═══════════════════════════════════════════ */
   .card {
-    @apply relative bg-void-300/50 p-6;
+    @apply relative bg-void-300 p-6;
     @apply border border-smoke-400/30;
     @apply shadow-card;
     @apply animate-fade-in;
-    @apply backdrop-blur-sm;
     border-radius: 14px;
     /* Subtle top edge highlight */
     box-shadow:

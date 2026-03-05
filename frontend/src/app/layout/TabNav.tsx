@@ -70,7 +70,7 @@ export default function TabNav({ activeTab, onTabChange }: TabNavProps) {
     <div className="
       fixed bottom-0 left-0 right-0 z-50
       sm:static sm:sticky sm:top-0 sm:z-20
-      backdrop-blur-md bg-void-500/95 sm:bg-void-500/80
+      backdrop-blur-md bg-void-500/95 sm:bg-void-500
       border-t sm:border-t-0 sm:border-b border-smoke-400/15
       safe-area-bottom
     ">

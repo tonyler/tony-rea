@@ -60,13 +60,22 @@ export interface MCPIngestResult {
   uri: string;
   success: boolean;
   entry?: Entry;
+  ingestAction?: IngestAction;
   error?: string;
+}
+
+export interface IngestAction {
+  action: 'created' | 'merged' | 'superseded';
+  entryId: string;
+  reasoning?: string;
+  mergedIntoTitle?: string;
+  deprecatedEntryIds?: string[];
 }
 
 // Feed API
 export const feedApi = {
   ingest: (projectId: string, content: string, sources?: string[], tags?: string[]) =>
-    request<{ entries: Entry[]; count: number; suggestedNewTags?: string[] }>('/feed/ingest', {
+    request<{ entries: Entry[]; count: number; suggestedNewTags?: string[]; actions?: IngestAction[] }>('/feed/ingest', {
       method: 'POST',
       body: JSON.stringify({ projectId, content, sources, tags }),
     }),
@@ -215,6 +224,7 @@ export const articlesApi = {
           revisionModel: llmConfig.revisionModel,
           councilMode: llmConfig.councilMode,
           judges: llmConfig.judges,
+          maxTokens: llmConfig.maxTokens,
         } : {}),
       }),
     });

@@ -11,11 +11,12 @@ import {
   recordCall,
   canAffordCall,
   estimateMaxCallCost,
+  estimateRevisionCost,
   BudgetTracker,
   ModelId,
   getAvailableModels,
 } from '../services/multi-llm';
-import { getClaudeV1Prompt, getClaudeFinalPrompt, getQuickRevisionPrompt, ArticleRequest, FlaggedPhraseWithJudge } from '../prompts/articles';
+import { getClaudeV1Prompt, getClaudeFinalPrompt, getQuickRevisionPrompt, getVoiceJudgePrompt, ArticleRequest, FlaggedPhraseWithJudge } from '../prompts/articles';
 import { saveArticle, loadArticle, listArticles, initializeArticleStorage } from '../services/storage';
 import { ArticleResult, ArticleResultSchema } from '../schemas/article-result';
 import { retrieveRelevantEntries, formatRetrievedKnowledge } from '../services/retrieval';
@@ -37,6 +38,9 @@ const MODEL_LABELS: Record<string, string> = {
   'gemini-3-pro': 'Gemini 3 Pro',
   'grok-4-1-fast': 'Grok 4.1',
   'grok-4-1-fast-x': 'Grok 4.1',
+  'sonar': 'Sonar',
+  'gemini-flash': 'Gemini Flash',
+  'mistral-creative': 'Mistral Creative',
 };
 
 function modelLabel(id: string): string {
@@ -46,6 +50,9 @@ function modelLabel(id: string): string {
 // Initialize LLM providers and article storage on module load
 initializeProviders();
 initializeArticleStorage();
+
+const VoiceNoteSchema = z.object({ phrase: z.string(), issue: z.string(), fix: z.string() });
+const VoiceJudgeOutputSchema = z.object({ notes: z.array(VoiceNoteSchema) });
 
 // New flexible request schema
 const ArticleRequestSchema = z.object({
@@ -71,6 +78,11 @@ const ModelIdEnum = z.enum([
   'gemini-3-pro',
   'grok-4-1-fast',
   'grok-4-1-fast-x',
+  'sonar',
+  'gemini-flash',
+  'mistral-creative',
+  'kimi-k2-thinking',
+  'kimi-k2.5',
 ]);
 const JudgeRoleEnum = z.enum(['fact-checker', 'slop-detector', 'originality-reviewer', 'rules-enforcer']);
 const SearchModeEnum = z.enum(['full', 'none', 'web-only', 'x-only']);
@@ -89,7 +101,8 @@ const GenerateRequestSchema = z.object({
   // LLM configuration
   searchMode: SearchModeEnum.default('full'),
   draftModel: ModelIdEnum.default('claude-sonnet-4-6'),
-  revisionModel: ModelIdEnum.default('claude-sonnet-4-6'),
+  revisionModel: z.union([ModelIdEnum, z.literal('auto')]).default('auto'),
+  maxTokens: z.number().min(1000).max(65536).default(8192),
   judges: z.array(z.object({
     model: ModelIdEnum,
     role: JudgeRoleEnum,
@@ -152,9 +165,10 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
 
     const {
       voiceHandle, content, request, wordCount, constraints, projectId,
-      searchMode, draftModel, revisionModel, judges: judgesInput, councilMode,
+      searchMode, draftModel, revisionModel: revisionModelInput, judges: judgesInput, councilMode, maxTokens,
     } = parsed.data;
-    console.log(`[articles] Generating for voice=${voiceHandle}, wordCount=${wordCount}, draft=${draftModel}, council=${councilMode}${projectId ? `, project=${projectId}` : ''}`);
+    const revisionModel = revisionModelInput === 'auto' ? draftModel : revisionModelInput as ModelId;
+    console.log(`[articles] Generating for voice=${voiceHandle}, wordCount=${wordCount}, draft=${draftModel}, revision=${revisionModel}${revisionModelInput === 'auto' ? ' (auto)' : ''}, council=${councilMode}${projectId ? `, project=${projectId}` : ''}`);
 
     // Build ArticleRequest from input
     let articleRequest: ArticleRequest | undefined;
@@ -232,12 +246,27 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       systemPrompt: claudeV1Prompt.system,
       userPrompt: claudeV1Prompt.user,
       temperature: 0.7,
-      maxTokens: 8192,
+      maxTokens,
     }, ArticleContentSchema);
 
     let v1Result = draftResult;
 
     if (!v1Result.success || !v1Result.data) {
+      const isTruncationError = v1Result.error?.includes('response truncated');
+      if (isTruncationError) {
+        console.warn(`[articles] ${draftModel} truncated response. Retrying with GPT-5-mini (higher output limit)...`);
+        const truncRetry = await callMultiLLM('gpt-5-mini', {
+          systemPrompt: claudeV1Prompt.system,
+          userPrompt: claudeV1Prompt.user,
+          temperature: 0.7,
+          maxTokens,
+        }, ArticleContentSchema);
+        v1Result = truncRetry;
+        if (v1Result.success) {
+          budget = recordCall(budget, 'gpt-5-mini', v1Result.tokens, v1Result.cost);
+        }
+      }
+
       const isJsonParseError = v1Result.error?.includes('JSON parse error');
       if (isJsonParseError) {
         const strictJsonSystem = `${claudeV1Prompt.system}\n\nReturn ONLY valid JSON. Do not include tool calls, browsing steps, or <search> tags.`;
@@ -246,7 +275,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
           systemPrompt: strictJsonSystem,
           userPrompt: claudeV1Prompt.user,
           temperature: 0.2,
-          maxTokens: 8192,
+          maxTokens,
         }, ArticleContentSchema);
         v1Result = sameModelRetry;
         if (v1Result.success) {
@@ -257,7 +286,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
             systemPrompt: strictJsonSystem,
             userPrompt: claudeV1Prompt.user,
             temperature: 0.2,
-            maxTokens: 8192,
+            maxTokens,
           }, ArticleContentSchema);
           v1Result = gptRetry;
           if (v1Result.success) {
@@ -281,6 +310,14 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
 
     const initialArticle = v1Result.data;
 
+    // Post-draft: log any banned word violations (non-blocking)
+    const BANNED_WORDS = ['matter', 'significant', 'significantly', 'compelling', 'delve', 'realm'];
+    const BANNED_SYMBOL = '—';
+    const draftText = `${initialArticle.title} ${initialArticle.content}`;
+    const bannedFound = BANNED_WORDS.filter(w => new RegExp(`\\b${w}\\b`, 'i').test(draftText));
+    if (bannedFound.length > 0) console.warn(`[articles] Draft contains banned words: ${bannedFound.join(', ')}`);
+    if (draftText.includes(BANNED_SYMBOL)) console.warn('[articles] Draft contains banned em dash "—"');
+
     // Step 3: Run council evaluation (quality/ethics only - no voice examples)
     let councilResult: Awaited<ReturnType<typeof runCouncil>> | null = null;
     let flaggedPhrases: FlaggedPhraseWithJudge[] = [];
@@ -298,7 +335,6 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
         const built = buildJudgeConfigs(judgesInput, searchMode);
         judgeConfigs = built.configs;
         judgeConfigWarnings = built.warnings;
-        warnings.push(...built.warnings);
       } else {
         judgeConfigs = getDefaultJudges(searchMode as SearchMode);
       }
@@ -309,11 +345,35 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
         searchMode: searchMode as SearchMode,
         judgeConfigWarnings,
         onProgress: sendProgress,
+        voiceProfile: voiceProfile ?? undefined,
       });
       budget = councilResult.budget;
       warnings.push(...councilResult.warnings);
       flaggedPhrases = councilResult.allFlaggedPhrases || [];
       earlyStop = councilResult.skipFinalRevision;
+    }
+
+    // Step 3.5: Voice adherence check (cheap model, flags voice slips for Step 4)
+    if (voiceProfile && !earlyStop) {
+      const voicePrompt = getVoiceJudgePrompt(initialArticle.content, voiceProfile);
+      const voiceCost = estimateMaxCallCost('gemini-flash', voicePrompt.system.length + voicePrompt.user.length, 1024);
+      if (canAffordCall(budget, voiceCost)) {
+        sendProgress('Checking voice adherence...');
+        const voiceResult = await callMultiLLM('gemini-flash', {
+          systemPrompt: voicePrompt.system,
+          userPrompt: voicePrompt.user,
+          maxTokens: 1024,
+          temperature: 0.3,
+        }, VoiceJudgeOutputSchema);
+        if (voiceResult.success && voiceResult.data?.notes.length) {
+          budget = recordCall(budget, 'gemini-flash', voiceResult.tokens, voiceResult.cost);
+          const voiceFlags: FlaggedPhraseWithJudge[] = voiceResult.data.notes.map(n => ({
+            ...n, judge: 'voice-judge'
+          }));
+          flaggedPhrases = [...flaggedPhrases, ...voiceFlags];
+          console.log(`[articles] Step 3.5: Voice judge flagged ${voiceFlags.length} issues`);
+        }
+      }
     }
 
     // Step 4: Auto-revise if council found issues (not early stop or skip final)
@@ -332,7 +392,8 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
         voiceProfile ?? undefined
       );
 
-      const estimatedRevisionCost = estimateMaxCallCost(
+      const estimatedRevisionCost = estimateRevisionCost(
+        draftModel,
         revisionModel,
         finalPrompt.system.length + finalPrompt.user.length,
         8192
@@ -347,7 +408,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
           systemPrompt: finalPrompt.system,
           userPrompt: finalPrompt.user,
           temperature: 0.5,
-          maxTokens: 8192,
+          maxTokens,
         }, ArticleContentSchema);
 
         if (finalResult.success && finalResult.data) {
@@ -373,6 +434,8 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       priority_fixes: [] as Array<{ fix: string; priority: number; votes: number }>,
     };
 
+    const uniqueWarnings = [...new Set(warnings)];
+
     const result: ArticleResult = {
       id: articleId,
       title: finalArticle.title,
@@ -392,7 +455,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
       },
       exampleArticles,
       ...(contentChanged ? { initialDraft: { title: initialArticle.title, content: initialArticle.content } } : {}),
-      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(uniqueWarnings.length > 0 ? { warnings: uniqueWarnings } : {}),
       createdAt: new Date().toISOString(),
     };
 

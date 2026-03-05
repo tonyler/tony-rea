@@ -73,7 +73,7 @@ function formatVoiceStyleGuide(profile: VoiceProfile): string {
 
   sections.push(`## Vocabulary & Phrases
 - Level: ${profile.lexicon.vocabulary_level}
-- Signature phrases: ${profile.lexicon.signature_phrases.map(p => `"${p}"`).join(', ')}
+- **Signature phrases** — naturally use 1-2 of these where they fit; do not force them: ${profile.lexicon.signature_phrases.map(p => `"${p}"`).join(', ')}
 - Emoji: ${profile.lexicon.emoji_usage}`);
 
   sections.push(`## Rhetoric
@@ -89,7 +89,8 @@ function formatVoiceStyleGuide(profile: VoiceProfile): string {
 - Transitions: ${profile.rhythm.transition_style}`);
 
   if (profile.anti_patterns.length > 0) {
-    sections.push(`## Anti-Patterns (NEVER do these)
+    sections.push(`## Anti-Patterns — ABSOLUTELY FORBIDDEN
+These are things this author NEVER does. Each violation is a critical voice failure that invalidates the article:
 ${profile.anti_patterns.map(p => `- ${p}`).join('\n')}`);
   }
 
@@ -141,13 +142,13 @@ ${voiceSection}
 # Writing Requirements
 
 1. **Accuracy First** - Never sacrifice facts for engagement or voice matching
-2. Match the voice from the examples - same energy, same style
-3. Create a compelling hook that fits naturally with the example style
-4. Build engagement throughout with specific examples
-5. Include a soft call-to-action (not aggressive)
+2. **Match the voice precisely** — same energy, sentence rhythm, vocabulary level, and structural patterns. Anti-patterns are critical failures. Signature phrases should appear naturally where they fit.
+3. Create a hook that fits the author's opening patterns — not generic AI hooks
+4. Build engagement with specific examples and the author's natural argument style
+5. Include a soft call-to-action that fits the author's closing patterns (not aggressive)
 6. Aim for ${wordCount} words
-7. Make it shareable and algorithm-friendly
-8. Mark opinions as opinions, facts as facts
+7. Make it shareable without being clickbait
+8. Mark opinions as opinions ("I think", "my view"), facts as facts
 
 ## Source Hierarchy (CRITICAL)
 When multiple sources of information conflict, follow this priority order:
@@ -187,6 +188,33 @@ Do not include any tool calls, browsing steps, or <search> tags. Output ONLY val
 - NO parenthetical hooks: "(and why it matters)", "(and what it means)"
 - NO colon formats: "Topic: the subtitle"
 - Keep it direct and specific to the content
+
+## WRITING MECHANICS (CRITICAL)
+
+**Sentence completeness**: Every sentence MUST have a subject and a verb. No fragments.
+- WRONG: "A total disaster." / "Worth watching." / "Compliance teams, legal review, risk assessment."
+- RIGHT: "It was a total disaster." / "The compliance teams, legal review, and risk assessment all had to sign off."
+
+**No bullet-as-prose**: Never write a list of nouns as sequential short sentences. This is a fragment list masquerading as prose.
+- WRONG: "Compliance teams, legal review, risk assessment. The whole thing."
+- RIGHT: "They ran it through compliance, legal review, and risk assessment before signing off."
+
+**Sentence flow — no staccato**: Avoid stringing multiple sentences under 8 words in a row. Short sentences feel punchy once; they feel robotic at scale.
+- WRONG: "That's a signal. That's the moat. The whole thing."
+- RIGHT: Integrate the point into the sentence before it — "That kind of institutional homework is the signal that changes how other investors read the room."
+- Limit sentences under 8 words to no more than 2 in a row before a longer sentence follows
+
+**Single-sentence paragraphs — use sparingly**: A one-sentence paragraph is a rhetorical tool, not a default style. Max 1-2 per full article, and only when the idea genuinely stands alone.
+- WRONG: Using "That's a signal." / "That's the moat." / "The whole thing." as standalone paragraphs multiple times per article
+- RIGHT: Fold the punchline into the paragraph above it, or follow it immediately with supporting context
+
+**Sentence length variety**: Aim for a rhythm that flows — vary between long, medium, and short. No stretch of more than 3 sentences in the same length range.
+
+**Paragraph length variety**: Vary paragraph length across the article. Use 3-5 sentence paragraphs for developed points. Avoid all paragraphs being the same length (strong AI tell).
+
+**Consecutive sentence openers**: Don't start 3+ sentences in a row with the same word.
+- WRONG: "The network grew. The team expanded. The community rallied."
+- RIGHT: Vary openers — "The network grew. By mid-year, the team had tripled. Community support followed."
 
 ## BANNED PHRASES — DO NOT USE ANY OF THESE (CRITICAL)
 
@@ -295,13 +323,110 @@ export function getJudgeR1Prompt(
   label: string,
   article: string,
   kbKnowledge?: string,
-  options?: { useWebSearch?: boolean }
+  options?: { useWebSearch?: boolean; profile?: VoiceProfile }
 ): { system: string; user: string } {
   const currentDate = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const useWebSearch = options?.useWebSearch ?? false;
   const webSearchLine = useWebSearch
     ? `2. VERIFY EACH ONE using web search - search for current data as of ${currentDate}`
     : '2. VERIFY EACH ONE against KB facts only (NO web search available)';
+
+  // Fact-checker gets its own focused prompt — no writing quality scoring, only fact validity
+  if (role === 'fact-checker') {
+    const kbSection = kbKnowledge ? `\n\n---\n\n# VERIFIED PROJECT KNOWLEDGE (GROUND TRUTH)\n\nUse these as PRIMARY source. Each entry has an ID you must reference:\n\n${kbKnowledge}\n\n**SOURCE HIERARCHY:** KB facts > web search. KB facts override web results.\n\n---\n` : '';
+
+    const verifyInstructions = useWebSearch
+      ? `- Check KB FIRST for each claim (source_type: "kb", source_id: entry title)\n- If not in KB, web search for current data as of ${currentDate} (source_type: "web", source_url: URL)\n- If cannot verify at all: source_type: "unverified"`
+      : `- Check KB FIRST for each claim (source_type: "kb", source_id: entry title)\n- If not in KB, mark as unverified (source_type: "unverified") — no web search available`;
+
+    const system = `You are a FACT CHECKER. Today is ${currentDate}.
+
+Your ONLY job is to verify concrete, undeniable facts stated in the article — numbers, prices, dates, statistics, protocol specs, historical events.
+
+## What to check
+- Specific numbers: token prices, TVL, market caps, trading volumes, supply figures
+- Specific dates and timelines
+- Technical facts: consensus mechanisms, token supplies, protocol specs
+- Named partnerships, integrations, or events that are publicly verifiable
+- Statistics and percentages cited as fact
+
+## What NOT to check
+- Opinions, interpretations, predictions, analysis
+- Phrases like "I think", "in my view", "this suggests", "arguably"
+- Subjective claims about quality or value
+- Market commentary or speculation
+- Writing style, AI slop, buzzwords — NOT your concern
+
+## Rules
+- Only extract claims stated as fact, not as opinion
+- Do NOT penalize opinions for being unverified — they are not claims
+- verdict is based SOLELY on factual accuracy:
+  - APPROVE: no mismatches, facts check out
+  - REVISE: 1+ mismatches or >30% unverifiable hard facts
+  - REJECT: multiple blatant factual errors`;
+
+    const user = `Fact-check this article. Ignore writing quality entirely.
+${kbSection}
+---
+ARTICLE:
+${article}
+---
+
+Extract ONLY concrete factual claims (not opinions). Verify each one.
+
+${verifyInstructions}
+
+Return JSON:
+{
+  "quality_scores": {
+    "ai_slop": 7,
+    "buzzword_density": 7,
+    "human_voice": 7,
+    "originality": 7,
+    "honesty_signals": 7,
+    "emotional_authenticity": 7,
+    "specificity": 7,
+    "jargon_accessibility": 7,
+    "source_credibility": 0-10,
+    "reader_respect": 7,
+    "repetition_density": 7
+  },
+  "overall": 0-10,
+  "flagged_phrases": [],
+  "top_issues": [],
+  "verdict": "APPROVE" | "REVISE" | "REJECT",
+  "reasoning": "1-2 sentences on factual accuracy only",
+  "fact_check_report": {
+    "claims": [
+      {
+        "claim": "what is being claimed",
+        "article_value": "what the article says",
+        "verified_value": "what you found",
+        "source_type": "kb" | "web" | "unverified",
+        "source_id": "KB entry title (if kb)",
+        "source_url": "URL (if web)",
+        "status": "match" | "mismatch" | "unverified"
+      }
+    ],
+    "summary": {
+      "total": <number of claims checked>,
+      "verified_kb": <count>,
+      "verified_web": <count>,
+      "mismatches": <count>,
+      "unverified": <count>
+    }
+  }
+}
+
+Rules:
+- source_credibility = the ONLY score that matters; set all other quality scores to 7 (neutral)
+- overall = same as source_credibility
+- flagged_phrases and top_issues = empty arrays
+- ANY mismatch → verdict REVISE or REJECT
+- If no verifiable hard facts in article → APPROVE with source_credibility: 8, reasoning: "No hard facts to verify"`;
+
+    return { system, user };
+  }
 
   const rolePersonalities: Record<JudgeRole, string> = {
     'fact-checker': `You are a THOROUGH FACT CHECKER. Today is ${currentDate}. Your job is to:
@@ -340,12 +465,73 @@ For EACH violation found, flag it with the specific rule broken. Be thorough.`,
 2. Focus ONLY on slop, voice authenticity, repetition, and buzzword density.
 3. Do NOT fact-check or verify numbers. That is the fact-checker's job.
 
+# WRITING MECHANICS CHECK (score as part of human_voice)
+
+These are AI writing tells that real humans avoid:
+
+**Fragment sentences** (penalize human_voice -1 per instance):
+- Sentences missing a subject or verb
+- Examples to flag: "A complete failure.", "Worth noting.", "Major problem."
+- Also flag: noun lists dressed as sentences — "Compliance teams, legal review, risk assessment."
+
+**Bullet-as-prose / staccato** (penalize human_voice -2 if found):
+- Writing a list of nouns as sequential short sentences: "Compliance teams, legal review, risk assessment. The whole thing."
+- This creates a choppy, fake-dramatic rhythm — a strong AI tell
+- Real writers integrate lists into sentences with connective tissue
+
+**Overused single-sentence paragraphs** (penalize human_voice -2 if 3+ in article):
+- Using "That's a signal." / "That's the moat." / "The whole thing." as standalone paragraphs repeatedly
+- One or two per article is a stylistic choice — more than that is AI filler
+- Flag the specific instances
+
+**Choppy sentence monotony** (penalize human_voice -2 if 3+ consecutive short sentences):
+- Three or more consecutive sentences under 8 words
+- Even if each sentence is complete, the repeated period creates a machine-gun rhythm
+
+**Uniform paragraph length** (penalize human_voice -2 if all paragraphs same length):
+- All paragraphs being 3-4 sentences is a strong AI tell
+- Real writers vary: 1-sentence punchy para, then a 5-sentence deep dive
+
+**Repetitive sentence openers** (penalize human_voice -1 per pattern):
+- Starting 3+ sentences in a row with the same word ("The...", "It...", "This...")
+
 Be thorough. No shortcuts.`,
   };
 
+  const profile = options?.profile;
+  const voiceSection = profile && (role === 'slop-detector' || role === 'originality-reviewer')
+    ? `
+---
+
+# VOICE PROFILE ADHERENCE (CRITICAL — part of human_voice score)
+
+The article must match this author's voice profile:
+
+**Voice DNA:** ${profile.quick_dna}
+
+**Anti-patterns — FORBIDDEN (penalize human_voice by 2pts each if found):**
+${profile.anti_patterns.map(p => `- ${p}`).join('\n')}
+
+**Signature phrases (author's natural language — should appear 1-2 times naturally):**
+${profile.lexicon.signature_phrases.map(p => `"${p}"`).join(', ')}
+
+**Tone:** ${profile.tone.primary} (secondary: ${profile.tone.secondary}), ${profile.tone.formality}
+
+**Sentence style:** ${profile.mechanics.avg_sentence_length}, ${profile.mechanics.paragraph_style}
+
+**Opening patterns:** ${profile.rhetoric.opening_patterns.join('; ')}
+
+If anti-patterns appear: deduct 2 pts from human_voice per violation.
+If zero signature phrases appear naturally: deduct 1 pt from human_voice.
+If tone/rhythm clearly doesn't match the profile: deduct 2 pts from human_voice.
+
+---
+`
+    : '';
+
   const system = `You are ${label}, a STRICT content quality reviewer.
 ${rolePersonalities[role]}
-
+${voiceSection}
 BE HARSH. Most AI-generated content deserves scores of 4-6, not 7-9.
 A score of 8+ means EXCEPTIONAL quality that clearly wasn't AI-generated.
 
@@ -821,6 +1007,17 @@ export function getClaudeFinalPrompt(
 - Do NOT sanitize or flatten the voice; keep punchy cadence and direct address where it exists
 - Preserve rhetorical devices that are natural to the voice (rhetorical questions, short punchy lines), unless they violate explicit rules
 
+## BANNED PHRASES — Still apply during revision. Do NOT reintroduce any of these.
+
+**Banned words:** "matter", "significant", "significantly", "compelling", "delve", "realm"
+**Banned symbol:** em dash "—" (use commas, periods, or parentheses)
+
+**AI slop — never use:**
+${AI_SLOP_PATTERNS.map(p => `"${p}"`).join(', ')}
+
+**Buzzwords — never use:**
+${BUZZWORD_LIST.map(b => `"${b}"`).join(', ')}
+
 ${voiceContext}`;
 
   const flaggedSection = flaggedPhrases && flaggedPhrases.length > 0
@@ -1098,6 +1295,59 @@ Rules:
 - Overall score = weighted average: ai_slop 3x, source_credibility 3x, repetition_density 2x, human_voice 2x, originality 2x
 - Check minimum gates: ai_slop >= 5, source_credibility >= 5, repetition_density >= 5, human_voice >= 4
 - PASS = overall >= 7 AND all minimums met, NEEDS_WORK = 4-6 OR any minimum failed, FAIL = < 4`;
+
+  return { system, user };
+}
+
+export function getVoiceJudgePrompt(article: string, profile: VoiceProfile): { system: string; user: string } {
+  const antiPatterns = profile.anti_patterns?.length
+    ? `## Anti-patterns to flag\n${profile.anti_patterns.map((p: string) => `- ${p}`).join('\n')}`
+    : '';
+
+  const signaturePhrases = profile.lexicon?.signature_phrases?.length
+    ? `## Signature phrases this author uses\n${profile.lexicon.signature_phrases.map((p: string) => `- ${p}`).join('\n')}`
+    : '';
+
+  const toneNotes = profile.tone
+    ? `## Tone profile\nprimary: ${profile.tone.primary}, secondary: ${profile.tone.secondary}, formality: ${profile.tone.formality}, humor: ${profile.tone.humor_style}`
+    : '';
+
+  const referenceSnippets = profile.reference_snippets?.length
+    ? `## Reference snippets (authentic voice samples)\n${profile.reference_snippets.slice(0, 3).map((s, i) => `--- Sample ${i + 1} ---\n${s.text.slice(0, 600)}`).join('\n\n')}`
+    : '';
+
+  const system = `You are a voice adherence reviewer. Your only job is to find phrases in the article that don't sound like this author.
+
+You do NOT evaluate content quality, factual accuracy, or structure. Only voice.
+
+${antiPatterns}
+
+${signaturePhrases}
+
+${toneNotes}
+
+${referenceSnippets}
+
+Instructions:
+- Find 3-7 specific phrases in the article that feel off for this author's voice
+- Quote the phrase EXACTLY as it appears in the article
+- Explain what's wrong voice-wise (too formal, too generic, anti-pattern used, etc.)
+- Suggest what the author would have written instead
+
+Respond with valid JSON only. No explanation outside the JSON.`;
+
+  const user = `Here is the article to review for voice adherence:
+
+---
+${article}
+---
+
+Return JSON in this exact format:
+{
+  "notes": [
+    { "phrase": "<exact quote from article>", "issue": "<what's wrong voice-wise>", "fix": "<what the author would have written>" }
+  ]
+}`;
 
   return { system, user };
 }

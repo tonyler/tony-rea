@@ -31,6 +31,18 @@ export interface LLMCallOptions {
   mode?: LLMMode;
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function shouldRetryWithoutResponseFormat(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('response_format') && message.includes('not supported');
+}
+
 export async function callLLM<T>(
   options: LLMCallOptions,
   schema: z.ZodSchema<T>
@@ -38,6 +50,7 @@ export async function callLLM<T>(
   if (!openai) {
     return { success: false, error: 'LLM service not initialized' };
   }
+  const client = openai;
 
   const {
     userPrompt,
@@ -55,14 +68,25 @@ export async function callLLM<T>(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await openai.chat.completions.create({
+      const createCompletion = async (useResponseFormat: boolean) => client.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
         temperature: finalTemperature,
+        ...(useResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
       });
+
+      let response;
+      try {
+        response = await createCompletion(true);
+      } catch (error) {
+        if (!shouldRetryWithoutResponseFormat(error)) {
+          throw error;
+        }
+        response = await createCompletion(false);
+      }
 
       const content = response.choices[0]?.message?.content;
 
@@ -86,11 +110,7 @@ export async function callLLM<T>(
         console.log('Retrying...');
       }
     } catch (error) {
-      if (error instanceof Error) {
-        lastError = `LLM API error: ${error.message}`;
-      } else {
-        lastError = 'Unknown LLM error';
-      }
+      lastError = `LLM API error: ${getErrorMessage(error)}`;
 
       // Don't retry on the last attempt
       if (attempt < maxRetries) {

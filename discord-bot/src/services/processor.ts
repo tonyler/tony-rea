@@ -1,13 +1,14 @@
 import {
   initializeStorage,
   getProject,
-  createEntry,
   compileKB,
   callLLM,
   getFeedIngestPrompt,
   FeedIngestResponseSchema,
   type Entry,
   type FeedIngestResponse,
+  curateAndSaveIngestEntry,
+  type CuratedIngestAction,
 } from '@tony-rea/shared';
 import { QueuedMessage, ProcessingResult } from '../types';
 import { classifyMessage } from './classifier';
@@ -67,34 +68,43 @@ export async function processMessage(message: QueuedMessage): Promise<Processing
       return { success: false, action: 'failed', error: 'Content processing failed' };
     }
 
-    // Create all entries
+    // Create or merge all entries via shared curation flow
     const createdEntries: Entry[] = [];
+    const actions: CuratedIngestAction[] = [];
+    const ingestGroupId = `discord-${message.id}`;
     for (const entryData of ingestResponse.entries) {
-      // Ensure source is set
-      if (!entryData.sources || entryData.sources.length === 0) {
-        entryData.sources = [message.messageUrl];
-      }
-      // Set date if not detected
-      if (!entryData.date_detected) {
-        entryData.date_detected = message.timestamp.toISOString().split('T')[0];
-      }
+      const result = await curateAndSaveIngestEntry(
+        message.projectId,
+        entryData,
+        {
+          defaultSources: [message.messageUrl],
+          defaultDate: message.timestamp.toISOString().split('T')[0],
+          ingestGroupId,
+        }
+      );
+      createdEntries.push(result.entry);
+      actions.push(result.ingestAction);
 
-      const entry = await createEntry(message.projectId, entryData);
-      createdEntries.push(entry);
-
-      logger.info('Created entry', {
-        entryId: entry.id,
-        title: entryData.title,
+      logger.info('Curated ingest saved entry', {
+        action: result.ingestAction.action,
+        entryId: result.entry.id,
+        title: result.entry.data.title,
         projectId: message.projectId,
+        deprecatedEntryIds: result.ingestAction.deprecatedEntryIds,
       });
     }
 
     // Recompile KB index
     await compileKB(message.projectId);
 
+    const finalAction =
+      actions.some((action) => action.action === 'superseded') ? 'superseded'
+      : actions.some((action) => action.action === 'merged') ? 'updated'
+      : 'created';
+
     return {
       success: true,
-      action: 'created',
+      action: finalAction,
       entryId: createdEntries[0]?.id,
     };
   } catch (error) {
@@ -136,4 +146,3 @@ async function processContent(message: QueuedMessage): Promise<FeedIngestRespons
     return null;
   }
 }
-

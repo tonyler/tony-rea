@@ -30,11 +30,25 @@ stop_process() {
     fi
 
     if ! ps -p $PID > /dev/null 2>&1; then
-        echo "⚠️  $NAME (PID $PID) is not running"
-        if [ -f "$PID_FILE" ]; then
-            rm "$PID_FILE"
+        if [ -n "$FALLBACK_PATTERN" ]; then
+            FALLBACK_PID=$(pgrep -f "$FALLBACK_PATTERN" | head -n 1)
+            if [ -n "$FALLBACK_PID" ]; then
+                echo "⚠️  $NAME PID file is stale (PID $PID), using detected PID $FALLBACK_PID"
+                PID=$FALLBACK_PID
+            else
+                echo "⚠️  $NAME (PID $PID) is not running"
+                if [ -f "$PID_FILE" ]; then
+                    rm "$PID_FILE"
+                fi
+                return 0
+            fi
+        else
+            echo "⚠️  $NAME (PID $PID) is not running"
+            if [ -f "$PID_FILE" ]; then
+                rm "$PID_FILE"
+            fi
+            return 0
         fi
-        return 0
     fi
 
     echo "▶️  Stopping $NAME (PID $PID)..."

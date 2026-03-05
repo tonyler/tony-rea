@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { env } from '../config/env';
 
-export type ModelProvider = 'anthropic' | 'perplexity' | 'xai';
+export type ModelProvider = 'anthropic' | 'perplexity' | 'xai' | 'openrouter' | 'perplexity-sonar';
 
 export type ModelId =
   // Anthropic Direct (prompt caching for draft/revision)
@@ -16,16 +16,24 @@ export type ModelId =
   | 'gpt-5.2'
   | 'gpt-5.1'
   | 'gpt-5-mini'
-  // Via Perplexity v1/responses — Google
+  // Via Perplexity v1/responses — xAI
+  | 'grok-4-1-fast'
+  // xAI Direct (X/Twitter search)
+  | 'grok-4-1-fast-x'
+  // Perplexity Sonar Direct (built-in web search)
+  | 'sonar'
+  // Via OpenRouter — Google Gemini
   | 'gemini-3.1-pro'
   | 'gemini-2.5-flash'
   | 'gemini-2.5-pro'
   | 'gemini-3-flash'
   | 'gemini-3-pro'
-  // Via Perplexity v1/responses — xAI
-  | 'grok-4-1-fast'
-  // xAI Direct (X/Twitter search)
-  | 'grok-4-1-fast-x';
+  | 'gemini-flash'
+  // Via OpenRouter — writing analysis
+  | 'mistral-creative'
+  // Via OpenRouter — Moonshot Kimi
+  | 'kimi-k2-thinking'
+  | 'kimi-k2.5';
 
 interface ModelCapabilities {
   webSearch: boolean;
@@ -38,6 +46,7 @@ interface ModelConfig {
   pricing: { input: number; output: number }; // per 1M tokens
   capabilities: ModelCapabilities;
   fixedTemperature?: number;
+  maxOutputTokens: number; // hard cap for this model
 }
 
 const MODELS: Record<ModelId, ModelConfig> = {
@@ -47,6 +56,7 @@ const MODELS: Record<ModelId, ModelConfig> = {
     modelName: 'claude-sonnet-4-6',
     pricing: { input: 3, output: 15 },
     capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 8192,
   },
   // Via Perplexity v1/responses — Anthropic
   'claude-opus-4-6': {
@@ -54,18 +64,21 @@ const MODELS: Record<ModelId, ModelConfig> = {
     modelName: 'anthropic/claude-opus-4-6',
     pricing: { input: 5, output: 25 },
     capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 8192,
   },
   'claude-haiku-4-5': {
     provider: 'perplexity',
     modelName: 'anthropic/claude-haiku-4-5',
     pricing: { input: 1, output: 5 },
     capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 8192,
   },
   'claude-opus-4-5': {
     provider: 'perplexity',
     modelName: 'anthropic/claude-opus-4-5',
     pricing: { input: 5, output: 25 },
     capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 8192,
   },
   // Via Perplexity v1/responses — OpenAI
   'gpt-5.2': {
@@ -73,49 +86,57 @@ const MODELS: Record<ModelId, ModelConfig> = {
     modelName: 'openai/gpt-5.2',
     pricing: { input: 1.75, output: 14 },
     capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 32768,
   },
   'gpt-5.1': {
     provider: 'perplexity',
     modelName: 'openai/gpt-5.1',
     pricing: { input: 1.25, output: 10 },
     capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 32768,
   },
   'gpt-5-mini': {
     provider: 'perplexity',
     modelName: 'openai/gpt-5-mini',
     pricing: { input: 0.25, output: 2 },
     capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 16384,
   },
-  // Via Perplexity v1/responses — Google
+  // Via OpenRouter — Google Gemini (chat completions with json_object mode)
   'gemini-3.1-pro': {
-    provider: 'perplexity',
+    provider: 'openrouter',
     modelName: 'google/gemini-3.1-pro-preview',
     pricing: { input: 2, output: 12 },
-    capabilities: { webSearch: true, xSearch: false },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 65536,
   },
   'gemini-2.5-flash': {
-    provider: 'perplexity',
+    provider: 'openrouter',
     modelName: 'google/gemini-2.5-flash',
     pricing: { input: 0.3, output: 2.5 },
-    capabilities: { webSearch: true, xSearch: false },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 65536,
   },
   'gemini-2.5-pro': {
-    provider: 'perplexity',
+    provider: 'openrouter',
     modelName: 'google/gemini-2.5-pro',
     pricing: { input: 1.25, output: 10 },
-    capabilities: { webSearch: true, xSearch: false },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 65536,
   },
   'gemini-3-flash': {
-    provider: 'perplexity',
+    provider: 'openrouter',
     modelName: 'google/gemini-3-flash-preview',
     pricing: { input: 0.5, output: 3 },
-    capabilities: { webSearch: true, xSearch: false },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 65536,
   },
   'gemini-3-pro': {
-    provider: 'perplexity',
+    provider: 'openrouter',
     modelName: 'google/gemini-3-pro-preview',
-    pricing: { input: 2.5, output: 15 },
-    capabilities: { webSearch: true, xSearch: false },
+    pricing: { input: 2, output: 12 },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 65536,
   },
   // Via Perplexity v1/responses — xAI
   'grok-4-1-fast': {
@@ -123,6 +144,7 @@ const MODELS: Record<ModelId, ModelConfig> = {
     modelName: 'xai/grok-4-1-fast-non-reasoning',
     pricing: { input: 0.2, output: 0.5 },
     capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 16384,
   },
   // xAI Direct — X/Twitter search
   'grok-4-1-fast-x': {
@@ -130,6 +152,45 @@ const MODELS: Record<ModelId, ModelConfig> = {
     modelName: 'grok-4-1-fast-non-reasoning',
     pricing: { input: 0.2, output: 0.5 },
     capabilities: { webSearch: false, xSearch: true },
+    maxOutputTokens: 16384,
+  },
+  // Perplexity Sonar Direct — built-in web search via chat completions API
+  'sonar': {
+    provider: 'perplexity-sonar',
+    modelName: 'sonar',
+    pricing: { input: 1, output: 1 },
+    capabilities: { webSearch: true, xSearch: false },
+    maxOutputTokens: 8192,
+  },
+  // Via OpenRouter — council/writing analysis models
+  'gemini-flash': {
+    provider: 'openrouter',
+    modelName: 'google/gemini-2.0-flash-001',
+    pricing: { input: 0.1, output: 0.4 },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 8192,
+  },
+  'mistral-creative': {
+    provider: 'openrouter',
+    modelName: 'mistralai/mistral-small-3.1-24b-instruct',
+    pricing: { input: 0.1, output: 0.3 },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 32768,
+  },
+  // Via OpenRouter — Moonshot Kimi
+  'kimi-k2-thinking': {
+    provider: 'openrouter',
+    modelName: 'moonshotai/kimi-k2-thinking',
+    pricing: { input: 0.47, output: 2 },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 65536,
+  },
+  'kimi-k2.5': {
+    provider: 'openrouter',
+    modelName: 'moonshotai/kimi-k2.5',
+    pricing: { input: 0.45, output: 2.2 },
+    capabilities: { webSearch: false, xSearch: false },
+    maxOutputTokens: 65536,
   },
 };
 
@@ -137,6 +198,8 @@ const JSON_RETRY_SUFFIX = '\n\nCRITICAL: Your previous response was not valid JS
 
 let anthropicClient: Anthropic | null = null;
 let xaiClient: OpenAI | null = null;
+let openrouterClient: OpenAI | null = null;
+let perplexitySonarClient: OpenAI | null = null;
 
 export function initializeProviders(): void {
   anthropicClient = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
@@ -146,6 +209,24 @@ export function initializeProviders(): void {
         baseURL: 'https://api.x.ai/v1',
       })
     : null;
+  openrouterClient = env.OPENROUTER_API_KEY
+    ? new OpenAI({
+        apiKey: env.OPENROUTER_API_KEY,
+        baseURL: 'https://openrouter.ai/api/v1',
+        defaultHeaders: {
+          'HTTP-Referer': 'https://tony-rea.com',
+          'X-Title': 'Tony Rea',
+        },
+      })
+    : null;
+  if (!env.OPENROUTER_API_KEY) {
+    console.warn('[multi-llm] OPENROUTER_API_KEY not set — openrouter models unavailable');
+  }
+  // Perplexity Sonar uses the standard chat completions endpoint (not /v1/responses)
+  perplexitySonarClient = new OpenAI({
+    apiKey: env.PERPLEXITY_API_KEY,
+    baseURL: 'https://api.perplexity.ai',
+  });
 }
 
 export interface MultiLLMOptions {
@@ -195,6 +276,32 @@ export function estimateMaxCallCost(
   return inputCost + outputCost;
 }
 
+/**
+ * Cache-aware revision cost estimate.
+ * When draftModel === revisionModel and provider is 'anthropic', the system prompt
+ * will be a cache hit (10% of input price) because the draft call already wrote it.
+ */
+export function estimateRevisionCost(
+  draftModel: ModelId,
+  revisionModel: ModelId,
+  inputChars: number,
+  maxOutputTokens: number
+): number {
+  const config = MODELS[revisionModel];
+  if (!config) return 0;
+
+  const inputTokens = estimateTokensFromChars(inputChars);
+  const outputTokens = Math.max(0, maxOutputTokens);
+  const outputCost = (outputTokens / 1_000_000) * config.pricing.output;
+
+  // When same model + anthropic provider: system prompt will be a cache hit
+  const isCacheHit = draftModel === revisionModel && config.provider === 'anthropic';
+  const inputRate = isCacheHit ? config.pricing.input * 0.10 : config.pricing.input;
+  const inputCost = (inputTokens / 1_000_000) * inputRate;
+
+  return inputCost + outputCost;
+}
+
 async function callProviderRaw(
   config: ModelConfig,
   options: MultiLLMOptions,
@@ -213,6 +320,12 @@ async function callProviderRaw(
     case 'xai':
       if (!xaiClient) throw new Error('xAI API key not configured');
       return callXAI(config.modelName, options.systemPrompt, options.userPrompt, temperature, maxTokens, options.useXSearch);
+    case 'openrouter':
+      if (!openrouterClient) throw new Error('OpenRouter API key not configured');
+      return callOpenRouter(config.modelName, options.systemPrompt, options.userPrompt, temperature, maxTokens);
+    case 'perplexity-sonar':
+      if (!perplexitySonarClient) throw new Error('Perplexity API key not configured');
+      return callPerplexitySonar(config.modelName, options.systemPrompt, options.userPrompt, temperature, maxTokens);
     default:
       throw new Error(`Unsupported provider: ${config.provider}`);
   }
@@ -229,7 +342,8 @@ export async function callMultiLLM<T>(
   }
 
   const temperature = config.fixedTemperature ?? (options.temperature ?? 0.7);
-  const maxTokens = options.maxTokens ?? 4096;
+  const requestedTokens = options.maxTokens ?? 4096;
+  const maxTokens = Math.min(requestedTokens, config.maxOutputTokens);
 
   const innerCall = async (): Promise<MultiLLMResult<T>> => {
     const first = await callProviderRaw(config, options, temperature, maxTokens);
@@ -242,6 +356,11 @@ export async function callMultiLLM<T>(
     // Attempt 1: parse JSON from response
     const parsed = parseJsonResponse(first.content);
     if (parsed.success) {
+      if (parsed.wasRepaired) {
+        // JSON was truncated mid-stream — treat as truncation error so caller can retry
+        console.warn(`[multi-llm] ${model} response was truncated (JSON required repair). Returning truncation error.`);
+        return { success: false, error: `response truncated: JSON was incomplete and required repair`, tokens: first.tokens, cost: firstCost };
+      }
       const validated = schema.safeParse(parsed.data);
       if (validated.success) {
         return { success: true, data: validated.data, tokens: first.tokens, cost: firstCost };
@@ -313,10 +432,8 @@ async function callAnthropic(
         cache_control: { type: 'ephemeral' },
       },
     ],
-    // Prefill assistant with { to force raw JSON output (no code blocks)
     messages: [
       { role: 'user', content: userPrompt },
-      { role: 'assistant', content: '{' },
     ],
   });
 
@@ -325,9 +442,7 @@ async function callAnthropic(
   }
 
   const textBlock = response.content.find((block: { type: string }) => block.type === 'text');
-  // Prepend { since we used assistant prefill to force raw JSON
-  const rawText = textBlock?.type === 'text' ? (textBlock as { type: 'text'; text: string }).text : '';
-  const content = '{' + rawText;
+  const content = textBlock?.type === 'text' ? (textBlock as { type: 'text'; text: string }).text : '';
 
   const usage = response.usage as {
     input_tokens: number;
@@ -365,6 +480,9 @@ async function callPerplexity(
     ).join('\n\n');
     fullUserPrompt = `${fileSection}\n\n---\n\n${userPrompt}`;
   }
+  // Reinforce JSON output at the end of the user message — some models (Gemini, GPT via Perplexity)
+  // ignore the system prompt JSON instruction and write plain text.
+  fullUserPrompt += '\n\nREMINDER: Respond with ONLY a valid JSON object. No markdown, no code blocks, no explanatory text. Start with { and end with }.';
 
   const input: Array<Record<string, unknown>> = [
     { type: 'message', role: 'system', content: systemPrompt },
@@ -393,7 +511,8 @@ async function callPerplexity(
         for (const item of output) {
           if (item.type === 'message' && item.content) {
             for (const block of item.content) {
-              if (block.type === 'output_text' && block.text) {
+              // Accept both 'output_text' (standard) and 'text' (Gemini via Perplexity)
+              if ((block.type === 'output_text' || block.type === 'text') && block.text) {
                 content += block.text;
               }
             }
@@ -490,7 +609,7 @@ async function perplexityFetchWithRetry(
 
       const result = extractResult(data);
 
-      console.log(`[multi-llm] Perplexity (${body.model}) usage: input=${result.tokens.input}, output=${result.tokens.output}`);
+      console.log(`[multi-llm] Perplexity (${body.model}) usage: input=${result.tokens.input}, output=${result.tokens.output}, content_start="${result.content.slice(0, 80).replace(/\n/g, ' ')}..."`);
 
       if (!result.content) {
         if (attempt < maxRetries - 1) {
@@ -606,8 +725,94 @@ async function callXAI(
     response_format: { type: 'json_object' },
   });
 
+  const finishReason = response.choices[0]?.finish_reason;
+  if (finishReason === 'length') {
+    throw new Error(`xAI (${modelName}) response truncated: hit max_tokens limit (${maxTokens}). Increase maxTokens or use a model with higher output limits.`);
+  }
+
   const content = response.choices[0]?.message?.content || '';
   const usage = response.usage;
+
+  return {
+    content,
+    tokens: {
+      input: usage?.prompt_tokens || 0,
+      output: usage?.completion_tokens || 0,
+    },
+  };
+}
+
+async function callOpenRouter(
+  modelName: string,
+  systemPrompt: string,
+  userPrompt: string,
+  temperature: number,
+  maxTokens: number
+): Promise<{ content: string; tokens: { input: number; output: number } }> {
+  if (!openrouterClient) {
+    throw new Error('OpenRouter client not initialized');
+  }
+
+  const response = await openrouterClient.chat.completions.create({
+    model: modelName,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature,
+    max_tokens: maxTokens,
+    response_format: { type: 'json_object' },
+  });
+
+  const finishReason = response.choices[0]?.finish_reason;
+  if (finishReason === 'length') {
+    throw new Error(`OpenRouter (${modelName}) response truncated: hit max_tokens limit (${maxTokens}). Increase maxTokens or use a model with higher output limits.`);
+  }
+
+  const content = response.choices[0]?.message?.content || '';
+  const usage = response.usage;
+
+  return {
+    content,
+    tokens: {
+      input: usage?.prompt_tokens || 0,
+      output: usage?.completion_tokens || 0,
+    },
+  };
+}
+
+async function callPerplexitySonar(
+  modelName: string,
+  systemPrompt: string,
+  userPrompt: string,
+  temperature: number,
+  maxTokens: number
+): Promise<{ content: string; tokens: { input: number; output: number } }> {
+  if (!perplexitySonarClient) {
+    throw new Error('Perplexity Sonar client not initialized');
+  }
+
+  // Sonar uses standard chat completions — web search is always built-in
+  const response = await perplexitySonarClient.chat.completions.create({
+    model: modelName,
+    stream: false,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature,
+    max_tokens: maxTokens,
+  });
+
+  const finishReason = response.choices[0]?.finish_reason;
+  if (finishReason === 'length') {
+    console.warn(`[multi-llm] Perplexity Sonar (${modelName}) response truncated (max_tokens=${maxTokens}, finish_reason=length)`);
+  }
+
+  const content = response.choices[0]?.message?.content || '';
+  const usage = response.usage;
+
+  console.log(`[multi-llm] Perplexity Sonar (${modelName}) usage: input=${usage?.prompt_tokens || 0}, output=${usage?.completion_tokens || 0}`);
 
   return {
     content,
@@ -624,7 +829,7 @@ function getDateMonthsAgo(months: number): string {
   return date.toISOString().split('T')[0];
 }
 
-function parseJsonResponse(content: string): { success: true; data: unknown } | { success: false; error: string } {
+function parseJsonResponse(content: string): { success: true; data: unknown; wasRepaired?: boolean } | { success: false; error: string } {
   try {
     let jsonStr = content.trim();
 
@@ -688,7 +893,7 @@ function parseJsonResponse(content: string): { success: true; data: unknown } | 
     try {
       const data = JSON.parse(repaired);
       console.log('[parseJson] Repaired truncated JSON successfully');
-      return { success: true, data };
+      return { success: true, data, wasRepaired: true };
     } catch {
       // Fall through
     }

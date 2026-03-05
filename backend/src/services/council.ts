@@ -17,6 +17,7 @@ import {
   ContextFile,
 } from './multi-llm';
 import { getJudgeR1Prompt } from '../prompts/articles';
+import type { VoiceProfile } from '../schemas/voice-profile';
 import { formatRetrievedKnowledge } from './retrieval';
 import { readKBIndex, getEntriesByIds } from './storage';
 import { RetrievalResponseSchema } from '../schemas/output-schemas';
@@ -62,28 +63,36 @@ export interface CouncilOptions {
   searchMode?: SearchMode;
   judgeConfigWarnings?: string[];
   onProgress?: ProgressCallback;
+  voiceProfile?: VoiceProfile;
 }
 
 export function getDefaultJudges(searchMode: SearchMode = 'full'): JudgeConfig[] {
   return [
     {
-      model: 'grok-4-1-fast-x',  // xAI Direct — X search for data verification
+      model: 'grok-4-1-fast-x',  // xAI Direct — X/Twitter search for data verification
       role: 'fact-checker',
       label: 'grok-facts',
       useWebSearch: false,
       useXSearch: searchMode === 'full' || searchMode === 'x-only',
     },
     {
-      model: 'gpt-5.1',  // Via Perplexity — slop/AI pattern detection
+      model: 'sonar',  // Perplexity Sonar — built-in web search for fact-checking
+      role: 'fact-checker',
+      label: 'sonar-facts',
+      useWebSearch: true,
+      useXSearch: false,
+    },
+    {
+      model: 'gemini-flash',  // Via OpenRouter — cheap + fast slop/AI pattern detection
       role: 'slop-detector',
-      label: 'gpt-slop',
+      label: 'gemini-slop',
       useWebSearch: false,
       useXSearch: false,
     },
     {
-      model: 'gpt-5-mini',  // Via Perplexity — originality analysis
+      model: 'mistral-creative',  // Via OpenRouter — creative writing analysis
       role: 'originality-reviewer',
-      label: 'gpt-originality',
+      label: 'mistral-originality',
       useWebSearch: false,
       useXSearch: false,
     },
@@ -115,16 +124,23 @@ export function buildJudgeConfigs(
     }
 
     if (searchMode !== 'none') {
-      if (searchMode === 'full' || searchMode === 'web-only') {
-        if (caps.webSearch) {
-          useWebSearch = true;
-        } else if (j.role === 'fact-checker') {
-          warnings.push(`web search unavailable for ${j.model}, using KB only`);
-        }
+      const wantsWeb = searchMode === 'full' || searchMode === 'web-only';
+      const wantsX = searchMode === 'full' || searchMode === 'x-only';
+
+      if (wantsWeb && caps.webSearch) {
+        useWebSearch = true;
       }
-      if (searchMode === 'full' || searchMode === 'x-only') {
-        if (caps.xSearch) {
-          useXSearch = true;
+      if (wantsX && caps.xSearch) {
+        useXSearch = true;
+      }
+
+      if (j.role === 'fact-checker') {
+        if (searchMode === 'web-only' && !caps.webSearch) {
+          warnings.push(`web search unavailable for ${j.model}, using KB only`);
+        } else if (searchMode === 'x-only' && !caps.xSearch) {
+          warnings.push(`X search unavailable for ${j.model}, using KB only`);
+        } else if (searchMode === 'full' && !useWebSearch && !useXSearch) {
+          warnings.push(`web/X search unavailable for ${j.model}, using KB only`);
         }
       }
     }
@@ -146,15 +162,15 @@ export async function runCouncil(
   budget: BudgetTracker,
   options: CouncilOptions = {}
 ): Promise<CouncilResult> {
-  const { projectId, searchMode = 'full', judgeConfigWarnings, onProgress } = options;
+  const { projectId, searchMode = 'full', judgeConfigWarnings, onProgress, voiceProfile } = options;
   const warnings: string[] = [...(judgeConfigWarnings ?? [])];
   const judges = options.judges ?? getDefaultJudges(searchMode);
   const minJudgesRequired = Math.min(judges.length, 2);
 
-  console.log(`[council] Starting council evaluation with ${judges.length} judges...${projectId ? ' (per-judge KB retrieval)' : ''}`);
+  console.log(`[council] Starting council evaluation with ${judges.length} judges...${projectId ? ' (per-judge KB retrieval)' : ''}${voiceProfile ? ' (voice profile active)' : ''}`);
 
   const r1Start = Date.now();
-  const r1Result = await runJudgeRound(article, budget, judges, projectId, onProgress);
+  const r1Result = await runJudgeRound(article, budget, judges, projectId, onProgress, voiceProfile);
   console.log(`[council] Completed in ${((Date.now() - r1Start) / 1000).toFixed(1)}s`);
 
   if (!r1Result.success && r1Result.judgeCount < minJudgesRequired) {
@@ -267,6 +283,9 @@ const MODEL_LABELS: Record<string, string> = {
   'gemini-3-pro': 'Gemini 3 Pro',
   'grok-4-1-fast': 'Grok 4.1',
   'grok-4-1-fast-x': 'Grok 4.1',
+  'sonar': 'Sonar',
+  'gemini-flash': 'Gemini Flash',
+  'mistral-creative': 'Mistral Creative',
 };
 
 const ROLE_ACTIONS: Record<string, string> = {
@@ -288,12 +307,13 @@ async function runJudgeRound(
   budget: BudgetTracker,
   judges: JudgeConfig[],
   projectId?: string,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  voiceProfile?: VoiceProfile
 ): Promise<RoundResult> {
   const kbIndex = projectId ? await readKBIndex(projectId) : '';
 
-  // Split judges into groups: non-Perplexity (xAI) can run in parallel with Perplexity judges
-  // Perplexity judges run sequentially to avoid 429 rate limits
+  // Split judges into groups: only Perplexity-proxied judges run sequentially (429 rate limits)
+  // xAI, OpenRouter, and Perplexity Sonar can run in parallel
   const perplexityJudges = judges.filter(j => {
     const cfg = getModelConfig(j.model);
     return cfg?.provider === 'perplexity';
@@ -317,7 +337,7 @@ async function runJudgeRound(
     const timeoutMs = usesSearch ? JUDGE_TIMEOUT_WEB_SEARCH : JUDGE_TIMEOUT_DEFAULT;
 
     let timeoutId: ReturnType<typeof setTimeout>;
-    const judgePromise = judgeArticle(judge, article, currentBudget, projectId, kbIndex);
+    const judgePromise = judgeArticle(judge, article, currentBudget, projectId, kbIndex, voiceProfile);
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => reject(new Error(`Judge ${judge.label} timed out after ${timeoutMs / 1000}s`)), timeoutMs);
     });
@@ -385,7 +405,8 @@ async function judgeArticle(
   article: string,
   _budget: BudgetTracker,
   projectId?: string,
-  kbIndex?: string
+  kbIndex?: string,
+  voiceProfile?: VoiceProfile
 ): Promise<JudgeResult> {
   const startTime = Date.now();
 
@@ -393,6 +414,7 @@ async function judgeArticle(
 
   const prompt = getJudgeR1Prompt(judge.role, judge.label, article, kbKnowledge, {
     useWebSearch: judge.useWebSearch,
+    profile: voiceProfile,
   });
 
   const hasKB = !!kbKnowledge;

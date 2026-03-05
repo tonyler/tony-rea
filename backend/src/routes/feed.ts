@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { callLLM } from '../services/llm';
 import {
+  Entry,
   createEntry,
   listEntries,
   getEntry,
@@ -11,8 +12,10 @@ import {
 } from '../services/storage';
 import { compileKB } from '../services/kb-compiler';
 import {
+  FeedIngestResult,
   FeedIngestResponseSchema,
   KBPatchPlanSchema,
+  MergeEvaluationSchema,
 } from '../schemas/output-schemas';
 import { getFeedIngestPrompt } from '../prompts/feed-ingest';
 import { getFeedUpdatePrompt } from '../prompts/feed-update';
@@ -21,6 +24,8 @@ import { llmLimiter } from '../middleware/rate-limit';
 import { getMCPClient } from '../services/mcp-client';
 import { PREDEFINED_TAGS, normalizeToPrefinedTag, addPendingTag, buildTagNormalizationPrompt } from '../config/tags';
 import { TagNormalizationSchema } from '../schemas/output-schemas';
+import { retrieveRelevantEntries } from '../services/retrieval';
+import { getMergeEvaluationPrompt, buildMergeEvaluationUserPrompt } from '../prompts/merge-evaluation';
 
 const router = Router();
 
@@ -93,6 +98,346 @@ function normalizeTags(
   return { tags: deduped, invalidTags };
 }
 
+interface IngestAction {
+  action: 'created' | 'merged' | 'superseded';
+  entryId: string;
+  reasoning?: string;
+  mergedIntoTitle?: string;
+  deprecatedEntryIds?: string[];
+}
+
+const LEGACY_ENTRY_ID_PATTERN = /^entry-/i;
+const GENERIC_TITLE_PATTERNS = [
+  /^entry(?:\s+|[-_])?\d*$/i,
+  /^untitled$/i,
+  /^new entry$/i,
+  /^title$/i,
+  /^announcement$/i,
+  /^update$/i,
+  /^info$/i,
+];
+const TITLE_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'or', 'the', 'to', 'with', 'without',
+]);
+const TEXT_SIMILARITY_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'in', 'is', 'it', 'of', 'on', 'or',
+  'that', 'the', 'this', 'to', 'was', 'were', 'with',
+]);
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function stripMarkdown(value: string): string {
+  return value
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/[`*_>#~-]/g, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ');
+}
+
+function titleKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 80);
+}
+
+function tokenizeForSimilarity(value: string): Set<string> {
+  const tokens = (normalizeWhitespace(stripMarkdown(value)).toLowerCase().match(/[a-z0-9][a-z0-9'-]*/g) ?? [])
+    .filter((token) => token.length > 2 && !TEXT_SIMILARITY_STOP_WORDS.has(token));
+  return new Set(tokens);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) intersection++;
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function normalizeSource(source: string): string {
+  return source.trim().toLowerCase().replace(/\/+$/, '');
+}
+
+function hasSourceOverlap(a: string[] | null | undefined, b: string[] | null | undefined): boolean {
+  const first = new Set((a ?? []).map(normalizeSource).filter(Boolean));
+  if (first.size === 0) return false;
+  for (const source of b ?? []) {
+    if (first.has(normalizeSource(source))) return true;
+  }
+  return false;
+}
+
+function sharedTagCount(a: string[] | null | undefined, b: string[] | null | undefined): number {
+  const first = new Set((a ?? []).map((tag) => tag.toLowerCase()));
+  let count = 0;
+  for (const tag of b ?? []) {
+    if (first.has(tag.toLowerCase())) count++;
+  }
+  return count;
+}
+
+function shouldConsolidateDuplicate(canonicalEntry: Entry, candidate: Entry): boolean {
+  // Never auto-consolidate entries created in the same ingest run
+  if (
+    canonicalEntry.data.ingest_group_id &&
+    candidate.data.ingest_group_id &&
+    canonicalEntry.data.ingest_group_id === candidate.data.ingest_group_id
+  ) {
+    return false;
+  }
+
+  if (titleKey(canonicalEntry.data.title) !== titleKey(candidate.data.title)) {
+    return false;
+  }
+
+  // Strong signal: same source URL(s)
+  if (hasSourceOverlap(canonicalEntry.data.sources, candidate.data.sources)) {
+    return true;
+  }
+
+  // Strong signal: same day and meaningful tag overlap
+  if (
+    canonicalEntry.data.date_detected &&
+    candidate.data.date_detected &&
+    canonicalEntry.data.date_detected === candidate.data.date_detected &&
+    sharedTagCount(canonicalEntry.data.tags, candidate.data.tags) >= 2
+  ) {
+    return true;
+  }
+
+  // Content-level signal: high token overlap
+  const similarity = jaccardSimilarity(
+    tokenizeForSimilarity(canonicalEntry.data.full_content ?? ''),
+    tokenizeForSimilarity(candidate.data.full_content ?? '')
+  );
+  return similarity >= 0.72;
+}
+
+function generateIngestGroupId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (word.length <= 3 && word === word.toUpperCase()) {
+        return word;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+function isWeakTitle(title: string): boolean {
+  const cleaned = normalizeWhitespace(stripMarkdown(title));
+  if (!cleaned) return true;
+  if (GENERIC_TITLE_PATTERNS.some((pattern) => pattern.test(cleaned))) return true;
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  return words.length < 3;
+}
+
+function buildTitleFromContent(content: string): string {
+  const clean = normalizeWhitespace(stripMarkdown(content));
+  const tokens = clean.match(/[A-Za-z0-9][A-Za-z0-9'-]*/g) ?? [];
+  const filtered = tokens.filter((token) => !TITLE_STOP_WORDS.has(token.toLowerCase()));
+  const source = filtered.length >= 4 ? filtered : tokens;
+  const picked = source.slice(0, 6);
+  if (picked.length === 0) {
+    return 'Knowledge Update';
+  }
+  return toTitleCase(picked.join(' '));
+}
+
+function canonicalizeTitle(rawTitle: string | null | undefined, content: string): string {
+  const inputTitle = normalizeWhitespace(stripMarkdown(rawTitle ?? ''));
+  const title = isWeakTitle(inputTitle) ? buildTitleFromContent(content) : inputTitle;
+  const clipped = title.substring(0, 90).trim();
+  return clipped || 'Knowledge Update';
+}
+
+async function consolidateEntriesByTitle(
+  projectId: string,
+  canonicalEntry: Entry
+): Promise<string[]> {
+  const allEntries = await listEntries(projectId);
+  const activeEntries = allEntries.filter((entry) => !entry.deprecated && entry.id !== canonicalEntry.id);
+  const deprecatedEntryIds: string[] = [];
+
+  for (const candidate of activeEntries) {
+    if (!shouldConsolidateDuplicate(canonicalEntry, candidate)) continue;
+    await deprecateEntry(projectId, candidate.id, canonicalEntry.id);
+    deprecatedEntryIds.push(candidate.id);
+  }
+
+  return deprecatedEntryIds;
+}
+
+async function evaluateAndSave(
+  projectId: string,
+  entryData: FeedIngestResult
+): Promise<{ entry: Entry; ingestAction: IngestAction }> {
+  const normalizedEntry: FeedIngestResult = {
+    ...entryData,
+    title: canonicalizeTitle(entryData.title, entryData.full_content),
+    tags: entryData.tags && entryData.tags.length > 0 ? entryData.tags : ['Announcement'],
+  };
+
+  // 1. Find related existing entries via RAG retrieval
+  let existingEntries: Entry[] = [];
+  try {
+    const retrievalQuery = `${normalizedEntry.title} ${normalizedEntry.full_content.substring(0, 200)}`;
+    const retrieval = await retrieveRelevantEntries(projectId, retrievalQuery);
+    existingEntries = retrieval.entries.slice(0, 10);
+    console.log(`[Merge Eval] "${normalizedEntry.title}" — retrieval found ${existingEntries.length} related entries`);
+  } catch {
+    console.log(`[Merge Eval] "${normalizedEntry.title}" — retrieval failed, creating new entry`);
+    // Non-fatal: fall through to create
+  }
+
+  // 2. Skip merge LLM if no related entries found
+  if (existingEntries.length === 0) {
+    console.log(`[Merge Eval] "${normalizedEntry.title}" — no related entries, creating new`);
+    const entry = await createEntry(projectId, normalizedEntry);
+    const deprecatedEntryIds = await consolidateEntriesByTitle(projectId, entry);
+    return { entry, ingestAction: { action: 'created', entryId: entry.id, deprecatedEntryIds } };
+  }
+
+  // 3. Call gpt-5 to decide create vs merge
+  const candidateForPrompt = {
+    title: normalizedEntry.title,
+    full_content: normalizedEntry.full_content,
+    date_detected: normalizedEntry.date_detected,
+    tags: normalizedEntry.tags ?? [],
+  };
+  const existingForPrompt = existingEntries.map(e => ({
+    id: e.id,
+    title: e.data.title,
+    full_content: e.data.full_content,
+    date_detected: e.data.date_detected,
+    tags: e.data.tags ?? [],
+  }));
+
+  const mergeResult = await callLLM(
+    {
+      userPrompt: buildMergeEvaluationUserPrompt(candidateForPrompt, existingForPrompt),
+      systemPrompt: getMergeEvaluationPrompt(),
+      model: 'gpt-5',
+      temperature: 1,
+      maxRetries: 1,
+      maxTokens: 8192,
+    },
+    MergeEvaluationSchema
+  );
+
+  // 4. Fall back to create on failure or "create" decision
+  if (!mergeResult.success) {
+    console.log(`[Merge Eval] "${normalizedEntry.title}" — LLM failed (${mergeResult.error}), creating new`);
+    const entry = await createEntry(projectId, normalizedEntry);
+    const deprecatedEntryIds = await consolidateEntriesByTitle(projectId, entry);
+    return { entry, ingestAction: { action: 'created', entryId: entry.id, deprecatedEntryIds } };
+  }
+  console.log(`[Merge Eval] "${normalizedEntry.title}" — decision: ${mergeResult.data.action} | target: ${mergeResult.data.target_entry_id} | reason: ${mergeResult.data.reasoning}`);
+  if (mergeResult.data.action === 'create' ||
+      !mergeResult.data.target_entry_id ||
+      !mergeResult.data.merged_content) {
+    const entry = await createEntry(projectId, normalizedEntry);
+    const deprecatedEntryIds = await consolidateEntriesByTitle(projectId, entry);
+    return {
+      entry,
+      ingestAction: {
+        action: 'created',
+        entryId: entry.id,
+        reasoning: mergeResult.data.reasoning,
+        deprecatedEntryIds,
+      },
+    };
+  }
+
+  const { target_entry_id, merged_content, reasoning } = mergeResult.data;
+
+  // 5. Verify target still exists (guard against race conditions)
+  const existingEntry = await getEntry(projectId, target_entry_id);
+  if (!existingEntry) {
+    console.log(`[Merge Eval] "${normalizedEntry.title}" — target ${target_entry_id} not found, creating new`);
+    const entry = await createEntry(projectId, normalizedEntry);
+    const deprecatedEntryIds = await consolidateEntriesByTitle(projectId, entry);
+    return { entry, ingestAction: { action: 'created', entryId: entry.id, deprecatedEntryIds } };
+  }
+  console.log(`[Merge Eval] "${normalizedEntry.title}" — merging into "${existingEntry.data.title}" (${target_entry_id})`);
+
+  // 6. Union tags (case-insensitive dedup)
+  const existingTags = existingEntry.data.tags ?? [];
+  const unionTags = [...existingTags];
+  for (const tag of normalizedEntry.tags ?? []) {
+    if (!unionTags.some(t => t.toLowerCase() === tag.toLowerCase())) {
+      unionTags.push(tag);
+    }
+  }
+
+  const mergedTitle = canonicalizeTitle(
+    isWeakTitle(existingEntry.data.title) ? normalizedEntry.title : existingEntry.data.title,
+    merged_content
+  );
+
+  // 7. Legacy entry IDs get superseded into a new canonical entry
+  if (LEGACY_ENTRY_ID_PATTERN.test(target_entry_id)) {
+    const replacementEntry = await createEntry(projectId, {
+      title: mergedTitle,
+      full_content: merged_content,
+      tags: unionTags,
+      date_detected: normalizedEntry.date_detected ?? existingEntry.data.date_detected,
+      ingest_group_id: normalizedEntry.ingest_group_id ?? existingEntry.data.ingest_group_id,
+      sources: Array.from(new Set([
+        ...(existingEntry.data.sources ?? []),
+        ...(normalizedEntry.sources ?? []),
+      ])),
+    });
+    await deprecateEntry(projectId, target_entry_id, replacementEntry.id);
+    const consolidatedIds = await consolidateEntriesByTitle(projectId, replacementEntry);
+    return {
+      entry: replacementEntry,
+      ingestAction: {
+        action: 'superseded',
+        entryId: replacementEntry.id,
+        reasoning: reasoning ?? undefined,
+        mergedIntoTitle: existingEntry.data.title,
+        deprecatedEntryIds: [target_entry_id, ...consolidatedIds],
+      },
+    };
+  }
+
+  // 8. Update existing entry: merged content + union tags + newer date + union sources
+  const entry = await updateEntry(projectId, target_entry_id, {
+    title: mergedTitle,
+    full_content: merged_content,
+    tags: unionTags,
+    date_detected: normalizedEntry.date_detected ?? existingEntry.data.date_detected,
+    ingest_group_id: normalizedEntry.ingest_group_id ?? existingEntry.data.ingest_group_id,
+    sources: Array.from(new Set([
+      ...(existingEntry.data.sources ?? []),
+      ...(normalizedEntry.sources ?? []),
+    ])),
+  });
+  const deprecatedEntryIds = await consolidateEntriesByTitle(projectId, entry);
+  return {
+    entry,
+    ingestAction: {
+      action: 'merged',
+      entryId: entry.id,
+      reasoning: reasoning ?? undefined,
+      mergedIntoTitle: existingEntry.data.title,
+      deprecatedEntryIds,
+    },
+  };
+}
+
 // POST /api/feed/ingest - Ingest new knowledge
 router.post('/ingest', async (req, res, next) => {
   try {
@@ -146,7 +491,9 @@ router.post('/ingest', async (req, res, next) => {
 
     // Store all entries (handles topic splitting)
     const createdEntries = [];
+    const ingestActions: IngestAction[] = [];
     const allSuggestedTags: string[] = [];
+    const ingestGroupId = generateIngestGroupId('app');
 
     for (const entryData of result.data.entries) {
       // Ensure sources are set if provided
@@ -210,6 +557,7 @@ router.post('/ingest', async (req, res, next) => {
       }
 
       entryData.tags = tags;
+      entryData.ingest_group_id = ingestGroupId;
 
       // Track suggested new tags for review and add to pending
       if (invalidTags.length > 0) {
@@ -225,8 +573,9 @@ router.post('/ingest', async (req, res, next) => {
       // Remove suggested_new_tags before storing (already tracked)
       delete entryData.suggested_new_tags;
 
-      const entry = await createEntry(projectId, entryData);
+      const { entry, ingestAction } = await evaluateAndSave(projectId, entryData);
       createdEntries.push(entry);
+      ingestActions.push(ingestAction);
     }
 
     // Recompile KB index
@@ -236,6 +585,7 @@ router.post('/ingest', async (req, res, next) => {
       entries: createdEntries,
       count: createdEntries.length,
       suggestedNewTags: allSuggestedTags.length > 0 ? allSuggestedTags : undefined,
+      actions: ingestActions,
     });
   } catch (error) {
     next(error);
@@ -504,7 +854,7 @@ router.post('/mcp/ingest', async (req, res, next) => {
     const client = getMCPClient();
     await client.connect(mcpUrl);
 
-    const results: Array<{ uri: string; success: boolean; entry?: any; error?: string }> = [];
+    const results: Array<{ uri: string; success: boolean; entry?: Entry; ingestAction?: IngestAction; error?: string }> = [];
 
     try {
       // Get resources to process
@@ -518,6 +868,7 @@ router.post('/mcp/ingest', async (req, res, next) => {
       // Process each resource
       for (const resource of resources) {
         try {
+          const ingestGroupId = generateIngestGroupId('mcp');
           const contents = await client.readResource(resource.uri);
           const textContent = contents.find(c => c.text)?.text;
 
@@ -563,8 +914,9 @@ router.post('/mcp/ingest', async (req, res, next) => {
               console.log(`[MCP Ingest] Suggested new tags added to pending: ${invalidTags.join(', ')}`);
             }
             delete entryData.suggested_new_tags;
-            const entry = await createEntry(projectId, entryData);
-            results.push({ uri: resource.uri, success: true, entry });
+            entryData.ingest_group_id = ingestGroupId;
+            const { entry, ingestAction } = await evaluateAndSave(projectId, entryData);
+            results.push({ uri: resource.uri, success: true, entry, ingestAction });
           }
 
         } catch (error) {

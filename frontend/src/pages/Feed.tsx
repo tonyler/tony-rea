@@ -6,6 +6,7 @@ import ProjectSelector from '../components/ProjectSelector';
 import Card from '../components/Card';
 import { TagInput } from '../components/TagInput';
 import type { Entry } from '../features/feed/types';
+import type { IngestAction } from '../services/api';
 
 export default function Feed() {
   const feed = useFeed();
@@ -149,26 +150,58 @@ export default function Feed() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <div>
+                <div className="flex-1 min-w-0">
                   <h4 className="font-medium text-cream-100 mb-2">
                     Successfully ingested {feed.ingestResult.count} {feed.ingestResult.count === 1 ? 'entry' : 'entries'}
                   </h4>
-                  {feed.ingestResult.entries?.map((entry: Entry, idx: number) => (
-                    <div key={entry.id} className={idx > 0 ? 'mt-2 pt-2 border-t border-jade-500/20' : ''}>
-                      <p className="text-sm text-cream-200">
-                        <span className="font-mono text-jade-300">{entry.id}</span>: {entry.data.title}
-                      </p>
-                      {entry.data.tags && entry.data.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {entry.data.tags.map((tag) => (
-                            <span key={tag} className="px-1.5 py-0.5 bg-amber-400/10 text-amber-300 text-xs rounded">
-                              {tag}
-                            </span>
-                          ))}
+                  {feed.ingestResult.entries?.map((entry: Entry, idx: number) => {
+                    const action: IngestAction | undefined = feed.ingestResult.actions?.[idx];
+                    const isMerged = action?.action === 'merged';
+                    const isSuperseded = action?.action === 'superseded';
+                    const badgeClass = isSuperseded
+                      ? 'bg-sky-400/15 text-sky-300 border border-sky-400/30'
+                      : isMerged
+                        ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30'
+                        : 'bg-jade-400/15 text-jade-300 border border-jade-400/30';
+                    const badgeText = isSuperseded
+                      ? '↻ SUPERSEDED'
+                      : isMerged
+                        ? '⟳ MERGED'
+                        : '+ NEW';
+                    return (
+                      <div key={entry.id} className={idx > 0 ? 'mt-3 pt-3 border-t border-jade-500/20' : ''}>
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${badgeClass}`}>
+                            {badgeText}
+                          </span>
+                          <span className="text-sm text-cream-200 font-medium">{entry.data.title}</span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        {(isMerged || isSuperseded) && action?.mergedIntoTitle && action.mergedIntoTitle !== entry.data.title && (
+                          <p className="text-xs text-smoke-100 mb-1">
+                            into: <span className="text-amber-300/80">{action.mergedIntoTitle}</span>
+                          </p>
+                        )}
+                        {isSuperseded && action?.deprecatedEntryIds && action.deprecatedEntryIds.length > 0 && (
+                          <p className="text-xs text-smoke-100 mb-1">
+                            replaced: <span className="text-sky-300/80">{action.deprecatedEntryIds.join(', ')}</span>
+                          </p>
+                        )}
+                        {action?.reasoning && (
+                          <p className="text-xs text-smoke-200 italic mb-1">{action.reasoning}</p>
+                        )}
+                        <p className="text-xs text-smoke-200 font-mono">{entry.id}</p>
+                        {entry.data.tags && entry.data.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {entry.data.tags.map((tag) => (
+                              <span key={tag} className="px-1.5 py-0.5 bg-amber-400/10 text-amber-300 text-xs rounded">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {feed.ingestResult.suggestedNewTags && feed.ingestResult.suggestedNewTags.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-jade-500/20">
                       <p className="text-xs text-smoke-100 mb-1.5">Suggested new tags (pending review):</p>

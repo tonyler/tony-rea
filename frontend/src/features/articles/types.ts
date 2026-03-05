@@ -135,13 +135,18 @@ export type ModelId =
   | 'gpt-5.2'            // via Perplexity
   | 'gpt-5.1'            // via Perplexity
   | 'gpt-5-mini'         // via Perplexity
-  | 'gemini-3.1-pro'     // via Perplexity
-  | 'gemini-2.5-flash'   // via Perplexity
-  | 'gemini-2.5-pro'     // via Perplexity
-  | 'gemini-3-flash'     // via Perplexity
-  | 'gemini-3-pro'       // via Perplexity
   | 'grok-4-1-fast'      // via Perplexity
-  | 'grok-4-1-fast-x';   // xAI Direct (X search)
+  | 'grok-4-1-fast-x'   // xAI Direct (X search)
+  | 'sonar'              // Perplexity Sonar Direct (built-in web search)
+  | 'gemini-3.1-pro'     // via OpenRouter
+  | 'gemini-2.5-flash'   // via OpenRouter
+  | 'gemini-2.5-pro'     // via OpenRouter
+  | 'gemini-3-flash'     // via OpenRouter
+  | 'gemini-3-pro'       // via OpenRouter
+  | 'gemini-flash'       // via OpenRouter
+  | 'mistral-creative'   // via OpenRouter
+  | 'kimi-k2-thinking'   // via OpenRouter
+  | 'kimi-k2.5';         // via OpenRouter
 export type SearchMode = 'full' | 'none' | 'web-only' | 'x-only';
 export type CouncilMode = 'skip' | 'standard';
 export type JudgeRole = 'fact-checker' | 'slop-detector' | 'originality-reviewer' | 'rules-enforcer';
@@ -153,10 +158,11 @@ export interface JudgeSelection {
 
 export interface LLMConfig {
   draftModel: ModelId;
-  revisionModel: ModelId;
+  revisionModel: ModelId | 'auto';
   searchMode: SearchMode;
   councilMode: CouncilMode;
   judges: JudgeSelection[];
+  maxTokens: number;
 }
 
 export interface ArticleSummary {

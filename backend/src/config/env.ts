@@ -20,8 +20,9 @@ const envSchema = z.object({
   XAI_API_KEY: z.string().optional(),  // Only needed for X search
   OPENAI_API_KEY: z.string().optional(),  // Fallback only
   GOOGLE_API_KEY: z.string().optional(),  // Fallback only
-  // Article generation config (hard cap at $0.20)
-  MAX_ARTICLE_BUDGET: z.coerce.number().max(0.20, 'Budget cannot exceed $0.20').default(0.10),
+  OPENROUTER_API_KEY: z.string().optional(),  // OpenRouter (gemini-flash, mistral-creative)
+  // Article generation config (hard cap at $0.50)
+  MAX_ARTICLE_BUDGET: z.coerce.number().max(0.50, 'Budget cannot exceed $0.50').default(0.25),
 });
 
 export type Env = z.infer<typeof envSchema>;

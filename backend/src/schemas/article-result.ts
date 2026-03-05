@@ -23,19 +23,19 @@ export const VoiceScoresSchema = z.object({
 
 export type VoiceScores = z.infer<typeof VoiceScoresSchema>;
 
-// Quality & ethics scores
+// Quality & ethics scores — use coerce to handle LLMs returning scores as strings
 export const QualityScoresSchema = z.object({
-  ai_slop: z.number().min(0).max(10),
-  buzzword_density: z.number().min(0).max(10),
-  human_voice: z.number().min(0).max(10),
-  originality: z.number().min(0).max(10),
-  honesty_signals: z.number().min(0).max(10),
-  emotional_authenticity: z.number().min(0).max(10),
-  specificity: z.number().min(0).max(10),
-  jargon_accessibility: z.number().min(0).max(10),
-  source_credibility: z.number().min(0).max(10),
-  reader_respect: z.number().min(0).max(10),
-  repetition_density: z.number().min(0).max(10).optional(),
+  ai_slop: z.coerce.number().min(0).max(10),
+  buzzword_density: z.coerce.number().min(0).max(10),
+  human_voice: z.coerce.number().min(0).max(10),
+  originality: z.coerce.number().min(0).max(10),
+  honesty_signals: z.coerce.number().min(0).max(10),
+  emotional_authenticity: z.coerce.number().min(0).max(10),
+  specificity: z.coerce.number().min(0).max(10),
+  jargon_accessibility: z.coerce.number().min(0).max(10),
+  source_credibility: z.coerce.number().min(0).max(10),
+  reader_respect: z.coerce.number().min(0).max(10),
+  repetition_density: z.coerce.number().min(0).max(10).optional(),
 });
 
 export type QualityScores = z.infer<typeof QualityScoresSchema>;
@@ -79,7 +79,7 @@ export type FlaggedPhrase = z.infer<typeof FlaggedPhraseSchema>;
 
 export const JudgeIssueSchema = z.object({
   dimension: z.string(),
-  score: z.number(),
+  score: z.coerce.number(),
   fix: z.string(),
 });
 
@@ -90,7 +90,7 @@ export const JudgeOpinionSchema = z.object({
   judge: z.string(),
   round: z.number(),
   quality_scores: QualityScoresSchema,
-  overall: z.number().min(0).max(10),
+  overall: z.coerce.number().min(0).max(10),
   flagged_phrases: z.array(FlaggedPhraseSchema).max(6),
   top_issues: z.array(JudgeIssueSchema).max(4),
   verdict: z.enum(['APPROVE', 'REVISE', 'REJECT']),

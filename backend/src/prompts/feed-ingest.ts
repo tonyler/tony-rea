@@ -21,6 +21,7 @@ DO NOT:
 - Summarize or compress the content
 - Extract facts or bullet points
 - Modify the original text
+- Use placeholder titles (e.g., "Entry 1", "Untitled", "Announcement", "Update")
 
 PREDEFINED TAGS (use ONLY these in "tags" field):
 ${predefinedTags}

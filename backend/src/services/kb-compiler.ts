@@ -39,7 +39,9 @@ export async function compileKBIndex(projectId: string): Promise<void> {
     const tags = entry.data.tags && entry.data.tags.length > 0
       ? ` [${entry.data.tags.join(', ')}]`
       : '';
-    lines.push(`${entry.id}: ${entry.data.title}${tags}`);
+    const date = entry.data.date_detected ? ` (${entry.data.date_detected})` : '';
+    const preview = (entry.data.full_content ?? '').replace(/\s+/g, ' ').trim().substring(0, 150);
+    lines.push(`${entry.id}: ${entry.data.title}${tags}${date}\n  "${preview}"`);
   }
 
   await writeKBIndex(projectId, lines.join('\n'));

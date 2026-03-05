@@ -4,16 +4,17 @@ import { articlesApi } from '../../../services/api';
 import { articlesStorage } from '../../../services/localStorage';
 
 const DEFAULT_LLM_CONFIG: LLMConfig = {
-  draftModel: 'claude-sonnet-4-5',
-  revisionModel: 'claude-sonnet-4-5',
+  draftModel: 'claude-sonnet-4-6',
+  revisionModel: 'auto',
   searchMode: 'full',
   councilMode: 'standard',
   judges: [
-    { model: 'gemini-2.5-flash', role: 'fact-checker' },
-    { model: 'gpt-5-mini', role: 'originality-reviewer' },
-    { model: 'grok-4-1-fast-x', role: 'slop-detector' },
-    { model: 'grok-4-1-fast', role: 'rules-enforcer' },
+    { model: 'grok-4-1-fast-x', role: 'fact-checker' },
+    { model: 'sonar', role: 'fact-checker' },
+    { model: 'gemini-flash', role: 'slop-detector' },
+    { model: 'mistral-creative', role: 'originality-reviewer' },
   ],
+  maxTokens: 8192,
 };
 
 export function useArticles() {

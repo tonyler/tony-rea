@@ -114,11 +114,18 @@ export async function getProject(projectId: string): Promise<ProjectMeta | null>
 
 // Helper function to slugify a title
 function slugifyTitle(title: string): string {
-  return title
+  const rawSlug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .substring(0, 50); // Limit length
+
+  // Prevent placeholder slugs from low-quality titles (e.g., "Entry 1")
+  if (!rawSlug || /^entry(?:-|$)/.test(rawSlug) || /^untitled(?:-|$)/.test(rawSlug)) {
+    return 'knowledge-update';
+  }
+
+  return rawSlug;
 }
 
 // Helper function to generate unique entry ID from title
